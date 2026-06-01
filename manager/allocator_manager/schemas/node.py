@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class NodeResponse(BaseModel):
@@ -38,40 +38,8 @@ class NodeRegisterResponse(BaseModel):
 
 class NodeHeartbeatPayload(BaseModel):
     timestamp: datetime
-    device_count: int = 0
-    bound_device_count: int = 0
     agent_version: str | None = None
 
 
 class NodeHeartbeatResponse(BaseModel):
     acknowledged: bool
-
-
-class DeviceInfoPayload(BaseModel):
-    logical_name: str
-    vendor_id: str
-    product_id: str
-    serial: str | None = None
-    manufacturer: str | None = None
-    product_name: str | None = None
-    mac_address: str | None = None
-    device_class: str = "GENERIC"
-    usbip_bus_id: str | None = None
-    fingerprint: str
-    extra_metadata: dict = Field(default_factory=dict)
-
-
-class DeviceSyncPayload(BaseModel):
-    devices: list[DeviceInfoPayload]
-
-
-class DeviceSyncResponse(BaseModel):
-    synced: int
-    new: int
-    updated: int
-    removed: int
-
-
-class DeviceEventPayload(BaseModel):
-    event: str  # "added" | "removed"
-    device: DeviceInfoPayload

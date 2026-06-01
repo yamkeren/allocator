@@ -11,7 +11,6 @@ class SessionDeviceAttachInfo(BaseModel):
     usbip_bus_id: str | None
     usbip_attach_command: str | None
     device_class: str
-    status: str
 
     model_config = {"from_attributes": True}
 
@@ -21,9 +20,6 @@ class SessionResponse(BaseModel):
     client_id: str
     group_name: str
     status: str
-    lease_duration: int
-    lease_expires_at: datetime | None
-    last_heartbeat: datetime | None
     failure_reason: str | None
     devices: list[SessionDeviceAttachInfo]
     created_at: datetime
@@ -38,11 +34,3 @@ class SessionListResponse(BaseModel):
 
 class SessionCreate(BaseModel):
     group_name: str
-    lease_duration: int = Field(default=3600, ge=60, le=86400)
-    metadata: dict = Field(default_factory=dict)
-
-
-class SessionHeartbeatResponse(BaseModel):
-    session_id: str
-    lease_expires_at: datetime | None
-    status: str

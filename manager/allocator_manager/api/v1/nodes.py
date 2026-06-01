@@ -16,8 +16,7 @@ async def list_nodes(
     _: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> NodeListResponse:
-    svc = NodeService(db)
-    return await svc.list()
+    return await NodeService(db).list()
 
 
 @router.get("/{node_id}", response_model=NodeResponse)
@@ -26,18 +25,16 @@ async def get_node(
     _: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> NodeResponse:
-    svc = NodeService(db)
-    node = await svc.get(node_id)
+    node = await NodeService(db).get(node_id)
     if not node:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Node not found")
     return node
 
 
 @router.delete("/{node_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def deregister_node(
+async def delete_node(
     node_id: str = Path(...),
     _: str = Depends(require_api_key),
     db: AsyncSession = Depends(get_db),
 ) -> None:
-    svc = NodeService(db)
-    await svc.deregister(node_id)
+    await NodeService(db).delete(node_id)

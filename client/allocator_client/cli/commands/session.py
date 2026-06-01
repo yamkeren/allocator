@@ -13,14 +13,12 @@ console = Console()
 @app.command("create")
 def create_session(
     group: str = typer.Option(..., "--group", "-g", help="Group name to allocate"),
-    lease: int = typer.Option(3600, "--lease", help="Lease duration in seconds"),
 ) -> None:
     """Request a session for a group (allocates all devices atomically)."""
     async def _run():
         async with get_client() as client:
-            data = await client.create_session(group, lease_duration=lease)
-            console.print(f"[green]Session created:[/green] {data['session_id']}")
-            console.print(f"Status: {data['status']}")
+            data = await client.create_session(group)
+            console.print(f"[green]Session:[/green] {data['session_id']}  status={data['status']}")
             if data.get("devices"):
                 t = Table("Device", "Node IP", "Bus ID", "Attach Command")
                 for dev in data["devices"]:
@@ -31,6 +29,8 @@ def create_session(
                         dev.get("usbip_attach_command", ""),
                     )
                 console.print(t)
+            if data.get("failure_reason"):
+                console.print(f"[red]Failure:[/red] {data['failure_reason']}")
     asyncio.run(_run())
 
 
@@ -42,9 +42,9 @@ def list_sessions(
     async def _run():
         async with get_client() as client:
             data = await client.list_sessions(status=status)
-            t = Table("Session ID", "Group", "Status", "Lease Expires")
+            t = Table("Session ID", "Group", "Status", "Created")
             for s in data.get("items", []):
-                t.add_row(s["session_id"], s["group_name"], s["status"], str(s.get("lease_expires_at", "")))
+                t.add_row(s["session_id"], s["group_name"], s["status"], str(s.get("created_at", "")))
             console.print(t)
     asyncio.run(_run())
 
@@ -64,6 +64,6 @@ def release_session(session_id: str = typer.Argument(...)) -> None:
     """Release a session and return all devices to the pool."""
     async def _run():
         async with get_client() as client:
-            data = await client.release_session(session_id)
-            console.print(f"[yellow]Session releasing:[/yellow] {data}")
+            await client.release_session(session_id)
+            console.print(f"[yellow]Released:[/yellow] {session_id}")
     asyncio.run(_run())

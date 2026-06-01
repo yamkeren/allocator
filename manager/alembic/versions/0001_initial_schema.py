@@ -2,7 +2,7 @@
 
 Revision ID: 0001
 Revises:
-Create Date: 2026-05-28
+Create Date: 2026-06-01
 
 """
 
@@ -17,34 +17,24 @@ depends_on = None
 
 
 def upgrade() -> None:
-    # pgcrypto for gen_random_uuid() — also enabled in postgres/init.sql
     op.execute("CREATE EXTENSION IF NOT EXISTS pgcrypto")
 
-    # Enum types
-    nodestatus = postgresql.ENUM("ONLINE", "OFFLINE", "DEGRADED", name="nodestatus")
+    nodestatus = postgresql.ENUM("ONLINE", "OFFLINE", name="nodestatus")
     nodestatus.create(op.get_bind())
 
-    devicestatus = postgresql.ENUM(
-        "FREE", "RESERVED", "BINDING", "BOUND", "ATTACHED", "ACTIVE", "RELEASING", "ERROR",
-        name="devicestatus",
-    )
+    devicestatus = postgresql.ENUM("FREE", "ALLOCATED", "ERROR", name="devicestatus")
     devicestatus.create(op.get_bind())
 
     deviceclass = postgresql.ENUM(
-        "WIFI", "ETHERNET", "AUDIO", "HID", "SERIAL", "GENERIC",
-        name="deviceclass",
+        "WIFI", "ETHERNET", "AUDIO", "HID", "SERIAL", "GENERIC", name="deviceclass"
     )
     deviceclass.create(op.get_bind())
 
-    sessionstatus = postgresql.ENUM(
-        "PENDING", "RESERVING", "BINDING", "ACTIVE", "RELEASING", "RELEASED", "FAILED", "EXPIRED",
-        name="sessionstatus",
-    )
+    sessionstatus = postgresql.ENUM("ACTIVE", "RELEASED", "FAILED", name="sessionstatus")
     sessionstatus.create(op.get_bind())
 
     sessiondevicestatus = postgresql.ENUM(
-        "RESERVED", "BINDING", "BOUND", "ATTACHED", "ACTIVE", "RELEASING", "RELEASED", "ERROR",
-        name="sessiondevicestatus",
+        "ALLOCATED", "RELEASED", "ERROR", name="sessiondevicestatus"
     )
     sessiondevicestatus.create(op.get_bind())
 
@@ -57,16 +47,13 @@ def upgrade() -> None:
         sa.Column("ip_address", postgresql.INET, nullable=False),
         sa.Column("agent_port", sa.Integer, nullable=False, server_default="5000"),
         sa.Column("agent_url", sa.Text, nullable=False),
-        sa.Column("status", sa.Enum("ONLINE", "OFFLINE", "DEGRADED", name="nodestatus"), nullable=False, server_default="OFFLINE"),
+        sa.Column("status", sa.Enum("ONLINE", "OFFLINE", name="nodestatus"), nullable=False, server_default="OFFLINE"),
         sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=True),
         sa.Column("agent_version", sa.Text, nullable=True),
-        sa.Column("metadata", postgresql.JSONB, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_index("idx_nodes_status", "nodes", ["status"])
-    op.create_index("idx_nodes_last_heartbeat", "nodes", ["last_heartbeat"])
 
     # devices
     op.create_table(
@@ -81,17 +68,13 @@ def upgrade() -> None:
         sa.Column("product_name", sa.Text, nullable=True),
         sa.Column("mac_address", sa.Text, nullable=True),
         sa.Column("device_class", sa.Enum("WIFI", "ETHERNET", "AUDIO", "HID", "SERIAL", "GENERIC", name="deviceclass"), nullable=False, server_default="GENERIC"),
-        sa.Column("status", sa.Enum("FREE", "RESERVED", "BINDING", "BOUND", "ATTACHED", "ACTIVE", "RELEASING", "ERROR", name="devicestatus"), nullable=False, server_default="FREE"),
+        sa.Column("status", sa.Enum("FREE", "ALLOCATED", "ERROR", name="devicestatus"), nullable=False, server_default="FREE"),
         sa.Column("usbip_bus_id", sa.Text, nullable=True),
-        sa.Column("fingerprint", sa.Text, nullable=False),
-        sa.Column("extra_metadata", postgresql.JSONB, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
     op.create_unique_constraint("uq_device_per_node_logical", "devices", ["node_id", "logical_name"])
     op.create_index("idx_devices_status", "devices", ["status"])
-    op.create_index("idx_devices_fingerprint", "devices", ["fingerprint"])
     op.create_index("idx_devices_vendor_product", "devices", ["vendor_id", "product_id"])
 
     # groups
@@ -100,10 +83,8 @@ def upgrade() -> None:
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("name", sa.String(255), nullable=False, unique=True),
         sa.Column("description", sa.Text, nullable=True),
-        sa.Column("metadata", postgresql.JSONB, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("deleted_at", sa.DateTime(timezone=True), nullable=True),
     )
 
     # group_devices
@@ -111,7 +92,6 @@ def upgrade() -> None:
         "group_devices",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("group_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("groups.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("logical_name", sa.String(255), nullable=False),
         sa.Column("device_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("devices.id"), nullable=False),
         sa.Column("ordinal", sa.Integer, nullable=False, server_default="0"),
     )
@@ -126,12 +106,8 @@ def upgrade() -> None:
         sa.Column("client_id", sa.Text, nullable=False),
         sa.Column("group_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("groups.id"), nullable=False),
         sa.Column("group_name", sa.String(255), nullable=False),
-        sa.Column("status", sa.Enum("PENDING", "RESERVING", "BINDING", "ACTIVE", "RELEASING", "RELEASED", "FAILED", "EXPIRED", name="sessionstatus"), nullable=False, server_default="PENDING"),
-        sa.Column("lease_duration", sa.Integer, nullable=False, server_default="3600"),
-        sa.Column("lease_expires_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("status", sa.Enum("ACTIVE", "RELEASED", "FAILED", name="sessionstatus"), nullable=False, server_default="ACTIVE"),
         sa.Column("failure_reason", sa.Text, nullable=True),
-        sa.Column("client_metadata", postgresql.JSONB, nullable=False, server_default="{}"),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
@@ -139,10 +115,6 @@ def upgrade() -> None:
     op.create_index("idx_sessions_status", "sessions", ["status"])
     op.create_index("idx_sessions_client_id", "sessions", ["client_id"])
     op.create_index("idx_sessions_group_id", "sessions", ["group_id"])
-    op.execute(
-        "CREATE INDEX idx_sessions_active_leases ON sessions (lease_expires_at) "
-        "WHERE status = 'ACTIVE'"
-    )
 
     # session_devices
     op.create_table(
@@ -154,41 +126,18 @@ def upgrade() -> None:
         sa.Column("node_id", postgresql.UUID(as_uuid=True), nullable=False),
         sa.Column("node_agent_url", sa.Text, nullable=False),
         sa.Column("usbip_bus_id", sa.Text, nullable=True),
-        sa.Column("client_attach_port", sa.Integer, nullable=True),
-        sa.Column("status", sa.Enum("RESERVED", "BINDING", "BOUND", "ATTACHED", "ACTIVE", "RELEASING", "RELEASED", "ERROR", name="sessiondevicestatus"), nullable=False, server_default="RESERVED"),
-        sa.Column("bound_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("attached_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("status", sa.Enum("ALLOCATED", "RELEASED", "ERROR", name="sessiondevicestatus"), nullable=False, server_default="ALLOCATED"),
         sa.Column("error_detail", sa.Text, nullable=True),
+        sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
     )
     op.create_unique_constraint("uq_session_device", "session_devices", ["session_id", "device_id"])
     op.create_index("idx_session_devices_session_id", "session_devices", ["session_id"])
     op.create_index("idx_session_devices_device_id", "session_devices", ["device_id"])
-    op.create_index("idx_session_devices_status", "session_devices", ["status"])
-
-    # audit_log
-    op.create_table(
-        "audit_log",
-        sa.Column("id", sa.BigInteger, primary_key=True, autoincrement=True),
-        sa.Column("entity_type", sa.String(50), nullable=False),
-        sa.Column("entity_id", postgresql.UUID(as_uuid=True), nullable=False),
-        sa.Column("action", sa.String(100), nullable=False),
-        sa.Column("old_status", sa.Text, nullable=True),
-        sa.Column("new_status", sa.Text, nullable=True),
-        sa.Column("actor", sa.Text, nullable=True),
-        sa.Column("detail", postgresql.JSONB, nullable=False, server_default="{}"),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-    )
-    op.create_index("idx_audit_log_entity", "audit_log", ["entity_type", "entity_id"])
-    op.execute(
-        "CREATE INDEX idx_audit_log_brin ON audit_log USING BRIN(created_at)"
-    )
 
 
 def downgrade() -> None:
-    op.drop_table("audit_log")
     op.drop_table("session_devices")
     op.drop_table("sessions")
     op.drop_table("group_devices")
@@ -196,7 +145,5 @@ def downgrade() -> None:
     op.drop_table("devices")
     op.drop_table("nodes")
 
-    for enum_name in [
-        "sessiondevicestatus", "sessionstatus", "deviceclass", "devicestatus", "nodestatus"
-    ]:
+    for enum_name in ["sessiondevicestatus", "sessionstatus", "deviceclass", "devicestatus", "nodestatus"]:
         op.execute(f"DROP TYPE IF EXISTS {enum_name}")

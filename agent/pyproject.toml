@@ -10,16 +10,10 @@ requires-python = ">=3.12"
 dependencies = [
     "fastapi>=0.111",
     "uvicorn[standard]>=0.30",
-    "sqlalchemy[asyncio]>=2.0",
-    "aiosqlite>=0.20",
     "pydantic>=2.7",
     "pydantic-settings>=2.3",
     "httpx[asyncio]>=0.27",
-    "pyudev>=0.24",
-    "pyusb>=1.2",
     "structlog>=24.2",
-    "prometheus-client>=0.20",
-    "tenacity>=8.3",
 ]
 
 [project.optional-dependencies]

@@ -16,8 +16,6 @@ class DeviceResponse(BaseModel):
     device_class: str
     status: str
     usbip_bus_id: str | None
-    fingerprint: str
-    extra_metadata: dict
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -28,7 +26,19 @@ class DeviceListResponse(BaseModel):
     total: int
 
 
+class DeviceCreate(BaseModel):
+    node_id: str
+    logical_name: str = Field(..., pattern=r"^[a-z0-9_]+$", max_length=100)
+    vendor_id: str
+    product_id: str
+    serial: str | None = None
+    manufacturer: str | None = None
+    product_name: str | None = None
+    mac_address: str | None = None
+    device_class: str = "GENERIC"
+    usbip_bus_id: str | None = None
+
+
 class DevicePatch(BaseModel):
     device_class: str | None = None
-    description: str | None = None
-    extra_metadata: dict | None = None
+    usbip_bus_id: str | None = None
