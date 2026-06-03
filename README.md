@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="path/to/your/logo.png" alt="Project Logo" width="200">
+</p>
+
 # Allocator
 
 Distributed USB resource orchestration. Multiple clients share a pool of physical USB devices
