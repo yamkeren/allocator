@@ -1,0 +1,13 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "allocator",
+      "Group": "Servers",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "allocator",
+      "Username": "allocator",
+      "SSLMode": "prefer"
+    }
+  }
+}

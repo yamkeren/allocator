@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: allocator
+      POSTGRES_PASSWORD: allocator
+      POSTGRES_DB: allocator
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres/init.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U allocator"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  manager:
+    build:
+      # Repo root so the build can include the shared contract/ package.
+      context: ../..
+      dockerfile: manager/Dockerfile
+    working_dir: /app
+    ports:
+      # Host port is configurable (manager/setup.sh --port); container stays on 8000.
+      - "${MANAGER_PORT:-80}:8000"
+    environment:
+      DATABASE_URL: "postgresql+asyncpg://allocator:allocator@postgres:5432/allocator"
+      LOG_LEVEL: "DEBUG"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ../../manager:/app
+      - ../../contract:/contract
+    command: ["sh", "-c", "pip install -q -e /contract && pip install -q -e /app && alembic upgrade head && uvicorn allocator_manager.main:app --host 0.0.0.0 --port 8000 --reload"]
+
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+      PGADMIN_CONFIG_SERVER_MODE: "False"
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+      - ./pgadmin/servers.json:/pgadmin4/servers.json:ro
+    depends_on:
+      - postgres
+
+volumes:
+  postgres_data:
+  pgadmin_data:

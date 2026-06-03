@@ -37,8 +37,16 @@ class DeviceCreate(BaseModel):
     mac_address: str | None = None
     device_class: str = "GENERIC"
     usbip_bus_id: str | None = None
+    fingerprint: str
 
 
 class DevicePatch(BaseModel):
     device_class: str | None = None
     usbip_bus_id: str | None = None
+
+
+class DeviceRename(BaseModel):
+    name: str = Field(..., pattern=r"^[a-z0-9_]+$", max_length=100)
+    # If the name is taken on the node, force renames the holder to a generic
+    # name; without force the request 409s so the client can prompt.
+    force: bool = False

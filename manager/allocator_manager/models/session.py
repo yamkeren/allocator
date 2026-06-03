@@ -10,6 +10,7 @@ from allocator_manager.database import Base
 
 
 class SessionStatus(str, enum.Enum):
+    PENDING = "PENDING"  # queued: no eligible node yet, waiting for one to free up
     ACTIVE = "ACTIVE"
     RELEASED = "RELEASED"
     FAILED = "FAILED"
@@ -27,8 +28,12 @@ class Session(Base):
     status: Mapped[SessionStatus] = mapped_column(
         Enum(SessionStatus, name="sessionstatus"),
         nullable=False,
-        default=SessionStatus.ACTIVE,
+        default=SessionStatus.PENDING,
     )
+    # Optional node pin requested by the client; None means auto-pick.
+    requested_node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
+    # The node this session was actually allocated on (set when it goes ACTIVE).
+    node_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), nullable=True)
     failure_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)

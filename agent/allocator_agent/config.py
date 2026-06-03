@@ -5,7 +5,7 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
 
     # Manager connection
-    manager_url: str = "http://localhost:8000"
+    manager_url: str = "http://allocator.local"
     agent_secret: str = "dev-agent-secret"
     agent_secret_header: str = "X-Agent-Secret"
 
@@ -13,6 +13,10 @@ class Settings(BaseSettings):
     node_name: str = ""
     agent_host: str = "0.0.0.0"
     agent_port: int = 5000
+    # IP the manager should use to reach this agent. Leave empty to auto-detect
+    # the primary outbound IP; set explicitly when that can't be inferred
+    # (e.g. manager in a container reaching the host, NAT, multi-homed hosts).
+    advertise_ip: str = ""
 
     # USB/IP
     usbip_bind_timeout: int = 10

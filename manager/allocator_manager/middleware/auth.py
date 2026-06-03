@@ -1,26 +1,31 @@
 import structlog
-from fastapi import Depends, HTTPException, Security, status
+from fastapi import HTTPException, Security, status
 from fastapi.security import APIKeyHeader
 
 from allocator_manager.config import settings
 
 log = structlog.get_logger(__name__)
 
-_api_key_scheme = APIKeyHeader(name=settings.api_key_header, auto_error=False)
-_agent_secret_scheme = APIKeyHeader(name=settings.agent_secret_header, auto_error=False)
+_client_id_scheme = APIKeyHeader(
+    name=settings.client_id_header, scheme_name="ClientId", auto_error=False
+)
+_agent_secret_scheme = APIKeyHeader(
+    name=settings.agent_secret_header, scheme_name="AgentSecret", auto_error=False
+)
 
 
-async def require_api_key(api_key: str | None = Security(_api_key_scheme)) -> str:
-    """Dependency for client-facing endpoints. Returns the client identifier."""
-    if not api_key:
+async def require_client(client_id: str | None = Security(_client_id_scheme)) -> str:
+    """Client identity for session-scoped endpoints.
+
+    There is no client authentication: the identity is simply the client host's
+    name, sent as the X-Client-Id header. It scopes session ownership only.
+    """
+    if not client_id:
         raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Missing API key",
-            headers={"WWW-Authenticate": "ApiKey"},
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Missing client identifier ({settings.client_id_header})",
         )
-    # TODO Phase 7: look up hashed key in clients table; for MVP accept any non-empty key
-    # and use it as the client_id directly.
-    return api_key
+    return client_id
 
 
 async def require_agent_secret(

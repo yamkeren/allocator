@@ -2,7 +2,7 @@ import enum
 import uuid
 from datetime import UTC, datetime
 
-from sqlalchemy import DateTime, Enum, Index, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, Enum, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import INET, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -28,6 +28,10 @@ class Node(Base):
     )
     last_heartbeat: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     agent_version: Mapped[str | None] = mapped_column(Text, nullable=True)
+    # When frozen, the node is excluded from all new session allocation
+    # (auto-pick and explicit pin) until a client unfreezes it. Set by a client
+    # from within an active session; persists after the session ends.
+    frozen: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=lambda: datetime.now(UTC)
     )

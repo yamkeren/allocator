@@ -1,18 +1,21 @@
-"""Core allocation algorithm.
+"""Core allocation algorithm (single-node model).
 
-Phase 1 — RESERVATION (single DB transaction):
-  SELECT FOR UPDATE devices in canonical UUID order → validate FREE + node ONLINE
-  → bulk UPDATE to ALLOCATED → INSERT session_devices → session ACTIVE
+A group is a list of logical names. A session is satisfied by ONE node that has
+a FREE device for every name. Among eligible nodes we pick the one with the
+fewest TOTAL devices (least "additional" hardware tied up). If no node is
+eligible the session is left PENDING and the queue processor retries it later.
 
-Phase 2 — BINDING (saga, outside DB transaction):
-  For each device: call node agent bind
-  On failure: rollback all already-bound devices → session FAILED
+Phase 1 — RESERVATION (single DB transaction): lock the chosen node's matched
+devices, re-validate FREE, mark ALLOCATED, insert session_devices.
+Phase 2 — BINDING (saga, outside the txn): usbip bind each device on the node;
+roll back on failure.
 """
 
 from datetime import UTC, datetime
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from allocator_manager.models.device import Device, DeviceStatus
@@ -31,71 +34,146 @@ class AllocationError(Exception):
         super().__init__(detail or reason)
 
 
+class _DeviceRaced(Exception):
+    """A chosen device stopped being FREE between selection and locking.
+
+    Raised inside the reservation savepoint so it rolls back cleanly; the
+    caller treats it as "not available now" and queues the session.
+    """
+
+
+async def group_names(db: AsyncSession, group_name: str) -> list[str]:
+    """Ordered list of logical names that define a group."""
+    rows = (await db.execute(
+        select(GroupDevice.logical_name)
+        .join(Group, Group.id == GroupDevice.group_id)
+        .where(Group.name == group_name)
+        .order_by(GroupDevice.ordinal)
+    )).scalars().all()
+    return list(rows)
+
+
+async def eligible_nodes(
+    db: AsyncSession,
+    names: list[str],
+    requested_node_id=None,
+) -> list[tuple[Node, dict[str, Device]]]:
+    """Nodes that can satisfy all `names` right now, ranked best-first.
+
+    Eligible = ONLINE, not frozen, and a FREE device exists for every name.
+    Ranked by fewest total devices on the node (then node id for determinism).
+    Returns (node, {name: device}) tuples. Read-only — no locking.
+    """
+    if not names:
+        return []
+    node_q = select(Node).where(Node.status == NodeStatus.ONLINE, Node.frozen.is_(False))
+    if requested_node_id is not None:
+        node_q = node_q.where(Node.id == requested_node_id)
+    nodes = (await db.execute(node_q)).scalars().all()
+
+    ranked: list[tuple[int, Node, dict[str, Device]]] = []
+    for node in nodes:
+        free_devs = (await db.execute(
+            select(Device).where(
+                Device.node_id == node.id,
+                Device.status == DeviceStatus.FREE,
+                Device.logical_name.in_(names),
+            )
+        )).scalars().all()
+        by_name: dict[str, Device] = {}
+        for d in free_devs:
+            by_name.setdefault(d.logical_name, d)
+        if not all(n in by_name for n in names):
+            continue
+        total = (await db.execute(
+            select(func.count()).select_from(Device).where(Device.node_id == node.id)
+        )).scalar_one()
+        ranked.append((total, node, {n: by_name[n] for n in names}))
+
+    ranked.sort(key=lambda r: (r[0], str(r[1].id)))
+    return [(node, matched) for _, node, matched in ranked]
+
+
 class AllocationService:
     def __init__(self, db: AsyncSession) -> None:
         self._db = db
 
-    async def allocate(self, session: Session) -> None:
-        """Drive a session to ACTIVE or FAILED."""
+    async def allocate(self, session: Session) -> bool:
+        """Try to drive a PENDING session to ACTIVE.
+
+        Returns True if the session reached a terminal-for-the-queue state
+        (ACTIVE or FAILED), False if it remains PENDING (no eligible node yet).
+        """
+        names = await group_names(self._db, session.group_name)
+        if not names:
+            await self._fail_session(session, "group_empty", f"Group {session.group_name!r} has no devices")
+            return True
+
+        session_devices = await self._reserve(session, names)
+        if session_devices is None:
+            session.status = SessionStatus.PENDING
+            session.updated_at = datetime.now(UTC)
+            await self._db.commit()
+            log.info("session_queued", session_id=str(session.id), group=session.group_name)
+            return False
+
         try:
-            devices = await self._reserve(session)
-            await self._bind(session, devices)
-        except AllocationError as exc:
-            log.error(
-                "allocation_failed",
-                session_id=str(session.id),
-                reason=exc.reason,
-                detail=exc.detail,
-            )
+            await self._bind(session, session_devices)
+        except AllocationError:
+            # _bind already rolled back and marked the session FAILED.
+            pass
+        return True
 
-    async def _reserve(self, session: Session) -> list[SessionDevice]:
-        async with self._db.begin_nested():
-            result = await self._db.execute(
-                select(Device)
-                .join(GroupDevice, GroupDevice.device_id == Device.id)
-                .join(Group, Group.id == GroupDevice.group_id)
-                .where(Group.name == session.group_name)
-                .order_by(Device.id)
-                .with_for_update(nowait=True)
-            )
-            devices = result.scalars().all()
+    async def _reserve(self, session: Session, names: list[str]) -> list[SessionDevice] | None:
+        # Read-only candidate selection (no savepoint needed).
+        ranked = await eligible_nodes(self._db, names, session.requested_node_id)
+        if not ranked:
+            return None
+        node, matched = ranked[0]
 
-            if not devices:
-                await self._fail(session, "group_empty", f"Group {session.group_name!r} has no devices")
+        # Reserve under a savepoint. A NOWAIT lock failure (another reservation
+        # holds a device) or a lost race (device no longer FREE) must propagate
+        # OUT of begin_nested so the savepoint is rolled back cleanly; we then
+        # treat it as "not available right now" and let the caller queue.
+        session_devices: list[SessionDevice] = []
+        try:
+            async with self._db.begin_nested():
+                locked = (await self._db.execute(
+                    select(Device)
+                    .where(Device.id.in_([d.id for d in matched.values()]))
+                    .with_for_update(nowait=True)
+                )).scalars().all()
+                if any(d.status != DeviceStatus.FREE for d in locked):
+                    raise _DeviceRaced()
 
-            unavailable = [d for d in devices if d.status != DeviceStatus.FREE]
-            if unavailable:
-                names = [d.logical_name for d in unavailable]
-                await self._fail(session, f"devices_unavailable:{','.join(names)}", f"Devices not FREE: {names}")
+                now = datetime.now(UTC)
+                session.node_id = node.id
+                session.updated_at = now
+                for name in names:
+                    device = matched[name]
+                    device.status = DeviceStatus.ALLOCATED
+                    device.updated_at = now
+                    sd = SessionDevice(
+                        session_id=session.id,
+                        device_id=device.id,
+                        logical_name=name,
+                        node_id=node.id,
+                        node_agent_url=node.agent_url,
+                        usbip_bus_id=device.usbip_bus_id,
+                        status=SessionDeviceStatus.ALLOCATED,
+                    )
+                    self._db.add(sd)
+                    session_devices.append(sd)
+                await self._db.flush()
+        except (DBAPIError, _DeviceRaced):
+            return None
 
-            node_ids = {d.node_id for d in devices}
-            node_result = await self._db.execute(select(Node).where(Node.id.in_(node_ids)))
-            nodes = {n.id: n for n in node_result.scalars().all()}
-            offline = [n for n in nodes.values() if n.status != NodeStatus.ONLINE]
-            if offline:
-                names = [n.name for n in offline]
-                await self._fail(session, f"nodes_offline:{','.join(names)}", f"Nodes not ONLINE: {names}")
-
-            now = datetime.now(UTC)
-            session_devices = []
-            for device in devices:
-                device.status = DeviceStatus.ALLOCATED
-                device.updated_at = now
-                node = nodes[device.node_id]
-                sd = SessionDevice(
-                    session_id=session.id,
-                    device_id=device.id,
-                    logical_name=device.logical_name,
-                    node_id=device.node_id,
-                    node_agent_url=node.agent_url,
-                    usbip_bus_id=device.usbip_bus_id,
-                    status=SessionDeviceStatus.ALLOCATED,
-                )
-                self._db.add(sd)
-                session_devices.append(sd)
-            await self._db.flush()
-
-        log.info("reservation_committed", session_id=str(session.id), device_count=len(devices))
+        log.info(
+            "reservation_committed",
+            session_id=str(session.id),
+            node_id=str(node.id),
+            device_count=len(session_devices),
+        )
         return session_devices
 
     async def _bind(self, session: Session, session_devices: list[SessionDevice]) -> None:
@@ -198,9 +276,9 @@ class AllocationService:
         await self._db.commit()
         log.info("session_failed_after_rollback", session_id=str(session.id))
 
-    async def _fail(self, session: Session, reason: str, detail: str) -> None:
+    async def _fail_session(self, session: Session, reason: str, detail: str) -> None:
         session.status = SessionStatus.FAILED
         session.failure_reason = reason
         session.updated_at = datetime.now(UTC)
-        await self._db.flush()
-        raise AllocationError(reason, detail)
+        await self._db.commit()
+        log.error("allocation_failed", session_id=str(session.id), reason=reason, detail=detail)

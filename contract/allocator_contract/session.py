@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel
 
 
 class SessionDeviceAttachInfo(BaseModel):
@@ -19,7 +19,8 @@ class SessionResponse(BaseModel):
     session_id: str
     client_id: str
     group_name: str
-    status: str
+    status: str                  # PENDING | ACTIVE | RELEASED | FAILED
+    node_name: str | None        # the node this session was allocated on (None while PENDING)
     failure_reason: str | None
     devices: list[SessionDeviceAttachInfo]
     created_at: datetime
@@ -34,3 +35,4 @@ class SessionListResponse(BaseModel):
 
 class SessionCreate(BaseModel):
     group_name: str
+    node: str | None = None      # optional node name to pin the session to

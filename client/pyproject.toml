@@ -12,8 +12,8 @@ dependencies = [
     "typer[all]>=0.12",
     "rich>=13.7",
     "pydantic>=2.7",
-    "pydantic-settings>=2.3",
     "structlog>=24.2",
+    "allocator-contract",
 ]
 
 [project.optional-dependencies]

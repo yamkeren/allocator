@@ -13,6 +13,7 @@ class NodeResponse(BaseModel):
     status: str
     last_heartbeat: datetime | None
     agent_version: str | None
+    frozen: bool
     created_at: datetime
 
     model_config = {"from_attributes": True}
@@ -43,3 +44,26 @@ class NodeHeartbeatPayload(BaseModel):
 
 class NodeHeartbeatResponse(BaseModel):
     acknowledged: bool
+
+
+class DeviceInfoPayload(BaseModel):
+    vendor_id: str
+    product_id: str
+    serial: str | None = None
+    manufacturer: str | None = None
+    product_name: str | None = None
+    mac_address: str | None = None
+    device_class: str = "GENERIC"
+    usbip_bus_id: str | None = None
+    fingerprint: str
+
+
+class DeviceSyncPayload(BaseModel):
+    devices: list[DeviceInfoPayload]
+
+
+class DeviceSyncResponse(BaseModel):
+    synced: int
+    new: int
+    updated: int
+    removed: int = 0

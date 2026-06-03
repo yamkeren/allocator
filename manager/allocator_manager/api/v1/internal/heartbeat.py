@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from allocator_manager.database import get_db
 from allocator_manager.middleware.auth import require_agent_secret
-from allocator_manager.schemas.node import NodeHeartbeatPayload, NodeHeartbeatResponse
+from allocator_contract.node import NodeHeartbeatPayload, NodeHeartbeatResponse
 from allocator_manager.services.node import NodeService
 
 log = structlog.get_logger(__name__)

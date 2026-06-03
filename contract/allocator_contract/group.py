@@ -3,23 +3,14 @@ from datetime import datetime
 from pydantic import BaseModel, Field
 
 
-class GroupDeviceEntry(BaseModel):
-    logical_name: str
-    device_id: str
-    node_id: str
-    device_class: str
-
-    model_config = {"from_attributes": True}
-
-
 class GroupResponse(BaseModel):
     group_id: str
     name: str
     description: str | None
     device_count: int
-    available: bool
+    available: bool          # is there an eligible node that can satisfy the group right now
     active_sessions: int
-    devices: list[GroupDeviceEntry]
+    devices: list[str]       # logical names that make up the group
     created_at: datetime
 
     model_config = {"from_attributes": True}

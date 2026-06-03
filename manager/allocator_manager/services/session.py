@@ -12,12 +12,13 @@ from allocator_manager.models.group import Group
 from allocator_manager.models.node import Node
 from allocator_manager.models.session import Session, SessionStatus
 from allocator_manager.models.session_device import SessionDevice, SessionDeviceStatus
-from allocator_manager.schemas.session import (
+from allocator_contract.session import (
     SessionCreate,
     SessionDeviceAttachInfo,
     SessionListResponse,
     SessionResponse,
 )
+from allocator_manager.services.allocation import group_names
 
 log = structlog.get_logger(__name__)
 
@@ -43,11 +44,13 @@ def _session_to_response(session: Session, nodes: dict) -> SessionResponse:
             ),
             device_class=sd.device.device_class.value if sd.device else "GENERIC",
         ))
+    alloc_node = nodes.get(str(session.node_id)) if session.node_id else None
     return SessionResponse(
         session_id=str(session.id),
         client_id=session.client_id,
         group_name=session.group_name,
         status=session.status.value,
+        node_name=alloc_node.name if alloc_node else None,
         failure_reason=session.failure_reason,
         devices=device_infos,
         created_at=session.created_at,
@@ -59,21 +62,25 @@ class SessionService:
         self._db = db
 
     async def create(self, client_id: str, request: SessionCreate) -> SessionResponse:
-        group_result = await self._db.execute(
+        group = (await self._db.execute(
             select(Group).where(Group.name == request.group_name)
-        )
-        group = group_result.scalar_one_or_none()
+        )).scalar_one_or_none()
         if not group:
             raise HTTPException(
                 status_code=http_status.HTTP_404_NOT_FOUND,
                 detail=f"Group {request.group_name!r} not found",
             )
 
+        requested_node_id = None
+        if request.node:
+            requested_node_id = await self._validate_pinned_node(request.node, group.name)
+
         session = Session(
             client_id=client_id,
             group_id=group.id,
             group_name=group.name,
-            status=SessionStatus.ACTIVE,
+            status=SessionStatus.PENDING,
+            requested_node_id=requested_node_id,
         )
         self._db.add(session)
         await self._db.commit()
@@ -82,8 +89,55 @@ class SessionService:
         from allocator_manager.services.allocation import AllocationService
         await AllocationService(self._db).allocate(session)
 
-        await self._db.refresh(session, ["session_devices"])
-        return await self._load_session_response(session)
+        # Reload with session_devices + their device eager-loaded; building the
+        # response touches sd.device, which would otherwise lazy-load (and fail
+        # on the async session) during serialization.
+        full = await self._load_session(str(session.id))
+        return await self._load_session_response(full)
+
+    async def _validate_pinned_node(self, node_name: str, group_name: str) -> uuid.UUID:
+        node = (await self._db.execute(
+            select(Node).where(Node.name == node_name)
+        )).scalar_one_or_none()
+        if not node:
+            raise HTTPException(
+                status_code=http_status.HTTP_404_NOT_FOUND, detail=f"Node {node_name!r} not found"
+            )
+        if node.frozen:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT, detail=f"Node {node_name!r} is frozen"
+            )
+        names = await group_names(self._db, group_name)
+        present = set((await self._db.execute(
+            select(Device.logical_name).where(Device.node_id == node.id)
+        )).scalars().all())
+        missing = [n for n in names if n not in present]
+        if missing:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail=f"Node {node_name!r} is missing devices: {missing}",
+            )
+        return node.id
+
+    async def freeze(self, session_id: str, client_id: str) -> None:
+        session = await self._load_session(session_id)
+        if not session:
+            raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if session.client_id != client_id:
+            raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Not your session")
+        if session.status != SessionStatus.ACTIVE or session.node_id is None:
+            raise HTTPException(
+                status_code=http_status.HTTP_409_CONFLICT,
+                detail="Can only freeze the node of an ACTIVE session",
+            )
+        node = (await self._db.execute(
+            select(Node).where(Node.id == session.node_id)
+        )).scalar_one_or_none()
+        if node and not node.frozen:
+            node.frozen = True
+            node.updated_at = datetime.now(UTC)
+            await self._db.commit()
+            log.info("node_frozen", node_id=str(node.id), node_name=node.name, session_id=session_id)
 
     async def get(self, session_id: str, client_id: str) -> SessionResponse | None:
         session = await self._load_session(session_id)
@@ -148,6 +202,10 @@ class SessionService:
         await self._db.commit()
         log.info("session_released", session_id=session_id)
 
+        # Freed devices may unblock a queued session.
+        from allocator_manager.tasks.queue_processor import kick_queue
+        kick_queue()
+
     async def _load_session(self, session_id: str) -> Session | None:
         return (await self._db.execute(
             select(Session)
@@ -157,6 +215,8 @@ class SessionService:
 
     async def _load_session_response(self, session: Session) -> SessionResponse:
         node_ids = {sd.node_id for sd in session.session_devices}
+        if session.node_id:
+            node_ids.add(session.node_id)
         nodes: dict[str, Node] = {}
         if node_ids:
             nodes = {

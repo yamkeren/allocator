@@ -1,84 +1,118 @@
-"""AllocatorClient — HTTP client for the Central Manager API."""
+"""AllocatorClient — synchronous HTTP client for the Central Manager API.
+
+Blocking client built on httpx.Client (no event loop). Methods return typed
+models from the shared `allocator_contract` package.
+"""
 
 from __future__ import annotations
 
 import httpx
 import structlog
 
+from allocator_client.config import Config
+from allocator_contract.device import DeviceListResponse, DeviceRename, DeviceResponse
+from allocator_contract.group import GroupCreate, GroupListResponse, GroupResponse
+from allocator_contract.node import NodeListResponse, NodeResponse
+from allocator_contract.session import (
+    SessionCreate,
+    SessionListResponse,
+    SessionResponse,
+)
+
 log = structlog.get_logger(__name__)
 
 
+class NameConflict(Exception):
+    """Raised when renaming a device to a name already taken on the node."""
+
+    def __init__(self, detail: dict) -> None:
+        self.detail = detail
+        self.name = detail.get("name", "")
+        self.node = detail.get("node", "")
+        self.holder = detail.get("holder_logical_name", "")
+        super().__init__(f"name {self.name!r} already used by {self.holder!r} on {self.node!r}")
+
+
+def _parse(resp: httpx.Response, model):
+    resp.raise_for_status()
+    return model.model_validate(resp.json())
+
+
 class AllocatorClient:
-    def __init__(self, manager_url: str, api_key: str, timeout: float = 30.0) -> None:
-        self._base_url = manager_url.rstrip("/")
-        self._api_key = api_key
-        self._http = httpx.AsyncClient(
+    def __init__(
+        self,
+        manager_url: str | None = None,
+        client_id: str | None = None,
+        timeout: float = 30.0,
+        config: Config | None = None,
+    ) -> None:
+        # Values come from the JSON config file; args override them. `config`
+        # is exposed so callers can read/persist values:
+        #   client.config.set("url", "http://allocator.local")
+        self.config = config or Config()
+        self._base_url = (manager_url or self.config.get("url")).rstrip("/")
+        self._client_id = client_id or self.config.get("client_id")
+        # There is no client authentication — identity is just the hostname.
+        self._http = httpx.Client(
             base_url=self._base_url,
-            headers={"X-API-Key": api_key},
+            headers={"X-Client-Id": self._client_id},
             timeout=timeout,
         )
 
     # Sessions
 
-    async def create_session(self, group_name: str) -> dict:
-        resp = await self._http.post("/api/v1/sessions", json={"group_name": group_name})
-        resp.raise_for_status()
-        return resp.json()
+    def create_session(self, group_name: str, node: str | None = None) -> SessionResponse:
+        body = SessionCreate(group_name=group_name, node=node)
+        return _parse(self._http.post("/api/v1/sessions", json=body.model_dump()), SessionResponse)
 
-    async def get_session(self, session_id: str) -> dict:
-        resp = await self._http.get(f"/api/v1/sessions/{session_id}")
-        resp.raise_for_status()
-        return resp.json()
+    def get_session(self, session_id: str) -> SessionResponse:
+        return _parse(self._http.get(f"/api/v1/sessions/{session_id}"), SessionResponse)
 
-    async def release_session(self, session_id: str) -> None:
-        resp = await self._http.delete(f"/api/v1/sessions/{session_id}")
-        resp.raise_for_status()
+    def freeze_session_node(self, session_id: str) -> None:
+        self._http.post(f"/api/v1/sessions/{session_id}/freeze").raise_for_status()
 
-    async def list_sessions(self, status: str | None = None, group_name: str | None = None, limit: int = 50) -> dict:
+    def release_session(self, session_id: str) -> None:
+        self._http.delete(f"/api/v1/sessions/{session_id}").raise_for_status()
+
+    def list_sessions(
+        self, status: str | None = None, group_name: str | None = None, limit: int = 50
+    ) -> SessionListResponse:
         params: dict = {"limit": limit}
         if status:
             params["session_status"] = status
         if group_name:
             params["group_name"] = group_name
-        resp = await self._http.get("/api/v1/sessions", params=params)
-        resp.raise_for_status()
-        return resp.json()
+        return _parse(self._http.get("/api/v1/sessions", params=params), SessionListResponse)
 
     # Groups
 
-    async def create_group(self, name: str, devices: list[str], description: str = "") -> dict:
-        resp = await self._http.post(
-            "/api/v1/groups",
-            json={"name": name, "devices": devices, "description": description},
-        )
-        resp.raise_for_status()
-        return resp.json()
+    def create_group(self, name: str, devices: list[str], description: str = "") -> GroupResponse:
+        body = GroupCreate(name=name, devices=devices, description=description or None)
+        return _parse(self._http.post("/api/v1/groups", json=body.model_dump()), GroupResponse)
 
-    async def get_group(self, name: str) -> dict:
-        resp = await self._http.get(f"/api/v1/groups/{name}")
-        resp.raise_for_status()
-        return resp.json()
+    def get_group(self, name: str) -> GroupResponse:
+        return _parse(self._http.get(f"/api/v1/groups/{name}"), GroupResponse)
 
-    async def list_groups(self) -> dict:
-        resp = await self._http.get("/api/v1/groups")
-        resp.raise_for_status()
-        return resp.json()
+    def list_groups(self) -> GroupListResponse:
+        return _parse(self._http.get("/api/v1/groups"), GroupListResponse)
 
-    async def delete_group(self, name: str) -> None:
-        resp = await self._http.delete(f"/api/v1/groups/{name}")
-        resp.raise_for_status()
+    def delete_group(self, name: str) -> None:
+        self._http.delete(f"/api/v1/groups/{name}").raise_for_status()
 
     # Devices
 
-    async def register_device(self, node_id: str, logical_name: str, vendor_id: str, product_id: str, **kwargs) -> dict:
-        resp = await self._http.post(
+    def register_device(
+        self, node_id: str, logical_name: str, vendor_id: str, product_id: str, **kwargs
+    ) -> DeviceResponse:
+        resp = self._http.post(
             "/api/v1/devices",
             json={"node_id": node_id, "logical_name": logical_name, "vendor_id": vendor_id, "product_id": product_id, **kwargs},
         )
-        resp.raise_for_status()
-        return resp.json()
+        return _parse(resp, DeviceResponse)
 
-    async def list_devices(self, node_id: str | None = None, status: str | None = None, device_class: str | None = None) -> dict:
+    def list_devices(
+        self, node_id: str | None = None, status: str | None = None, device_class: str | None = None
+    ) -> DeviceListResponse:
         params = {}
         if node_id:
             params["node_id"] = node_id
@@ -86,38 +120,46 @@ class AllocatorClient:
             params["device_status"] = status
         if device_class:
             params["device_class"] = device_class
-        resp = await self._http.get("/api/v1/devices", params=params)
-        resp.raise_for_status()
-        return resp.json()
+        return _parse(self._http.get("/api/v1/devices", params=params), DeviceListResponse)
 
-    async def get_device(self, logical_name: str) -> dict:
-        resp = await self._http.get(f"/api/v1/devices/{logical_name}")
-        resp.raise_for_status()
-        return resp.json()
+    def get_device(self, node: str, logical_name: str) -> DeviceResponse:
+        return _parse(self._http.get(f"/api/v1/devices/{node}/{logical_name}"), DeviceResponse)
 
-    async def delete_device(self, logical_name: str) -> None:
-        resp = await self._http.delete(f"/api/v1/devices/{logical_name}")
-        resp.raise_for_status()
+    def rename_device(
+        self, node: str, logical_name: str, new_name: str, force: bool = False
+    ) -> DeviceResponse:
+        body = DeviceRename(name=new_name, force=force)
+        resp = self._http.post(
+            f"/api/v1/devices/{node}/{logical_name}/rename",
+            json=body.model_dump(),
+        )
+        if resp.status_code == 409:
+            detail = resp.json().get("detail")
+            if isinstance(detail, dict) and detail.get("error") == "name_conflict":
+                raise NameConflict(detail)
+        return _parse(resp, DeviceResponse)
+
+    def delete_device(self, node: str, logical_name: str) -> None:
+        self._http.delete(f"/api/v1/devices/{node}/{logical_name}").raise_for_status()
 
     # Nodes
 
-    async def list_nodes(self) -> dict:
-        resp = await self._http.get("/api/v1/nodes")
-        resp.raise_for_status()
-        return resp.json()
+    def list_nodes(self) -> NodeListResponse:
+        return _parse(self._http.get("/api/v1/nodes"), NodeListResponse)
 
-    async def get_node(self, node_id: str) -> dict:
-        resp = await self._http.get(f"/api/v1/nodes/{node_id}")
-        resp.raise_for_status()
-        return resp.json()
+    def get_node(self, node_id: str) -> NodeResponse:
+        return _parse(self._http.get(f"/api/v1/nodes/{node_id}"), NodeResponse)
+
+    def unfreeze_node(self, node: str) -> NodeResponse:
+        return _parse(self._http.post(f"/api/v1/nodes/{node}/unfreeze"), NodeResponse)
 
     # Lifecycle
 
-    async def aclose(self) -> None:
-        await self._http.aclose()
+    def close(self) -> None:
+        self._http.close()
 
-    async def __aenter__(self) -> AllocatorClient:
+    def __enter__(self) -> AllocatorClient:
         return self
 
-    async def __aexit__(self, *_) -> None:
-        await self.aclose()
+    def __exit__(self, *_) -> None:
+        self.close()

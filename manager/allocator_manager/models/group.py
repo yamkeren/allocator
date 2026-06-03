@@ -28,26 +28,25 @@ class Group(Base):
 
 
 class GroupDevice(Base):
+    """A group is a template: an ordered list of logical names, not a binding to
+    specific device rows. The names are resolved to actual devices on a single
+    node at session-allocation time."""
+
     __tablename__ = "group_devices"
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     group_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("groups.id", ondelete="CASCADE"), nullable=False
     )
-    device_id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), ForeignKey("devices.id"), nullable=False
-    )
+    logical_name: Mapped[str] = mapped_column(String(255), nullable=False)
     ordinal: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
 
     group: Mapped["Group"] = relationship("Group", back_populates="devices")
-    device: Mapped["Device"] = relationship("Device", back_populates="group_entries")
 
     __table_args__ = (
-        UniqueConstraint("group_id", "device_id", name="uq_group_device"),
+        UniqueConstraint("group_id", "logical_name", name="uq_group_logical_name"),
         Index("idx_group_devices_group_id", "group_id"),
-        Index("idx_group_devices_device_id", "device_id"),
     )
 
 
-from allocator_manager.models.device import Device  # noqa: E402, F401
 from allocator_manager.models.session import Session  # noqa: E402, F401

@@ -14,6 +14,8 @@ dependencies = [
     "pydantic-settings>=2.3",
     "httpx[asyncio]>=0.27",
     "structlog>=24.2",
+    "typer[all]>=0.12",
+    "allocator-contract",
 ]
 
 [project.optional-dependencies]
