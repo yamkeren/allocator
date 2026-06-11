@@ -1,9 +1,9 @@
 # Allocator Client
 
 Command-line tool (and Python library) for requesting USB devices from the allocator
-manager. You define **groups** of device names, open a **session** to allocate a group on a
-node, then `usbip attach` the devices locally. All orchestration goes through the manager over
-HTTP.
+manager. You open a **session** with a list of device names; the manager allocates them
+together on a single node, then you `usbip attach` the devices locally. All orchestration goes
+through the manager over HTTP.
 
 ---
 
@@ -76,26 +76,16 @@ allocator device name <node> <current_name> <new_name>
 If the new name is already used on that node, you'll be prompted:
 **[1] make the other device generic · [2] choose a different name · [3] abort**.
 
-### Groups (templates of device names)
+### Sessions (allocate a list of devices)
 ```bash
-allocator group create mygroup --devices wifi_0,hid_1     # comma-separated names
-allocator group list                                      # shows Available + Active Sessions
-allocator group show mygroup
-allocator group delete mygroup [--yes]
-```
-A group is just a list of names; it's matched to actual devices on a node when you start a
-session. `Available` = some online, unfrozen node currently has all those devices free.
-
-### Sessions (allocate a group)
-```bash
-allocator session create --group mygroup [--node <node>]   # -g / -n
+allocator session create --devices wifi_0,hid_1 [--node <node>]   # -d / -n
 allocator session list [--status ACTIVE|PENDING|RELEASED|FAILED]
 allocator session show <session_id>
 allocator session release <session_id>                     # frees + unbinds the devices
 ```
-- The manager picks **one node** that has every group device free (fewest-extra-devices wins),
-  or use `--node` to pin a specific node.
-- If no node can satisfy the group right now, the session is **PENDING** (queued) and starts
+- Pass a comma-separated list of logical names. The manager picks **one node** that has every
+  requested device free (fewest-extra-devices wins), or use `--node` to pin a specific node.
+- If no node can satisfy the request right now, the session is **PENDING** (queued) and starts
   automatically when a node frees up. Nothing is bound while queued.
 - A successful session is **ACTIVE** and prints an attach command per device.
 
@@ -133,11 +123,10 @@ allocator session release <session_id>    # then release on the manager
 ## Typical workflow
 
 ```bash
-export ALLOCATOR_URL=http://manager:8000
+allocator config set url http://manager:8000
 
 allocator device list                                  # find device names per node
-allocator group create lab --devices wifi_0,hid_0
-allocator session create --group lab                   # -> ACTIVE + attach commands
+allocator session create --devices wifi_0,hid_0        # -> ACTIVE + attach commands
 sudo usbip attach -r <node_ip> -b <bus_id>             # for each device
 # ... work ...
 allocator session release <session_id>
@@ -155,7 +144,7 @@ from allocator_client import AllocatorClient
 
 with AllocatorClient("http://manager:8000") as c:   # identity defaults to hostname
     nodes = c.list_nodes()                          # -> NodeListResponse
-    s = c.create_session("lab")                     # -> SessionResponse
+    s = c.create_session(["wifi_0", "hid_0"])       # -> SessionResponse
     for d in s.devices:
         print(d.logical_name, d.usbip_attach_command)
     c.release_session(s.session_id)
@@ -163,14 +152,14 @@ with AllocatorClient("http://manager:8000") as c:   # identity defaults to hostn
 
 `rename_device` raises `allocator_client.NameConflict` on a name collision (when `force=False`).
 
-`AllocatorSession` allocates a group, runs `usbip attach` for each device, and on exit detaches
-and releases — with rollback if an attach fails midway (needs root for the usbip ops):
+`AllocatorSession` allocates a list of devices, runs `usbip attach` for each device, and on exit
+detaches and releases — with rollback if an attach fails midway (needs root for the usbip ops):
 
 ```python
 from allocator_client import AllocatorClient, AllocatorSession
 
 with AllocatorClient("http://manager:8000") as client:
-    with AllocatorSession(client, "lab") as session:
+    with AllocatorSession(client, ["wifi_0", "hid_0"]) as session:
         # every device is already usbip-attached here
         for d in session.devices:
             print(d.logical_name, "-> local port", d.local_port)

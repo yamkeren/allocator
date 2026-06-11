@@ -23,7 +23,7 @@ class Settings(BaseSettings):
     usbipd_port: int = 3240
 
     # Heartbeat
-    heartbeat_interval: int = 15
+    heartbeat_interval: int = 60
 
     # Logging
     log_level: str = "INFO"

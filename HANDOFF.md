@@ -1,9 +1,17 @@
 # Allocator — Project Handoff
 
-_Last updated: 2026-06-03_
+_Last updated: 2026-06-04_
+
+> **2026-06-04 — Groups removed.** The `group` abstraction is gone end-to-end. A client now
+> starts a session with an **ad-hoc list of device names** (`session create --devices a,b,c`)
+> instead of a saved group name. Sessions store the request in a `sessions.requested_devices`
+> `text[]` column; the wait queue is now keyed on the **sorted requested-device set** (was
+> per-group). The `groups`/`group_devices` tables, `/api/v1/groups` API, `GroupService`,
+> `allocator group` CLI, and the `allocator_contract.group` models were all deleted. The
+> sections below have been updated to match.
 
 A distributed, transactional scheduler that allocates **USB devices across Linux nodes** to
-client sessions as atomic groups, using **USB/IP** (`usbip bind`/`attach`) as the transport.
+client sessions as atomic sets, using **USB/IP** (`usbip bind`/`attach`) as the transport.
 It is a correctness-first resource scheduler (leasing, locking, rollback, a queue), not a
 simple USB manager.
 
@@ -14,7 +22,7 @@ simple USB manager.
 ```
 allocator/
 ├── contract/           # allocator-contract: shared Pydantic API models (pydantic-only)
-│   └── allocator_contract/{node,device,group,session,usbip}.py
+│   └── allocator_contract/{node,device,session,usbip}.py
 ├── manager/            # central FastAPI service + Postgres (the brain)
 │   ├── allocator_manager/{models,services,api,tasks,middleware}/
 │   ├── alembic/        # single migration 0001 (greenfield — edited in place, not appended)
@@ -43,7 +51,7 @@ and single-sourced in `allocator_contract`.
 ## 2. Architecture & flow
 
 - **Client → Manager** (HTTP, identity = hostname header `X-Client-Id`, no auth): all
-  orchestration — create/list/release sessions, freeze nodes, groups, device rename, reads.
+  orchestration — create/list/release sessions, freeze nodes, device rename, reads.
 - **Agent → Manager** (HTTP, `X-Agent-Secret`): self-register, heartbeat, push device inventory.
 - **Manager → Agent** (HTTP, `X-Agent-Secret`): `usbip bind`/`unbind` during allocation.
 - **Client ↔ Agent** (TCP 3240, USB/IP): the client runs `usbip attach` using coordinates
@@ -64,10 +72,9 @@ Background tasks (manager `tasks/`, started in `main.py` lifespan): `heartbeat_r
     fingerprints are unique **per node**, not globally.
 - **device_names**: `(fingerprint → name)` — durable, portable custom-name memory; survives
   unplug/prune and follows a device across nodes.
-- **groups** / **group_devices**: a group is a **list of logical names** (`group_devices`
-  holds `logical_name`, NOT a device FK) — a name template resolved to devices at session time.
-- **sessions**: `client_id`, `group_name`, `status` (**PENDING**/ACTIVE/RELEASED/FAILED),
-  `requested_node_id` (pin), `node_id` (resolved).
+- **sessions**: `client_id`, `requested_devices` (`text[]` of logical names the client asked
+  for), `status` (**PENDING**/ACTIVE/RELEASED/FAILED), `requested_node_id` (pin),
+  `node_id` (resolved).
 - **session_devices**: per-device allocation rows (device_id, snapshot logical_name, node,
   agent_url, bus_id, status).
 
@@ -93,12 +100,14 @@ IMAGE, SMARTCARD, SERIAL, GENERIC.
   resolves composite devices by priority, Bluetooth gated on subclass/protocol.
 
 **Allocation (single-node model, `services/allocation.py`):**
-- A group is satisfied by **one node** that has a FREE device for **every** name.
+- A session's requested device list is satisfied by **one node** that has a FREE device for
+  **every** name.
 - Eligible node = ONLINE, **not frozen**, all names FREE. Among eligible, pick **fewest total
   devices**. Reservation locks rows `FOR UPDATE NOWAIT` in a savepoint; bind is a saga outside
   the txn with reverse-order rollback on failure.
-- No eligible node → session **PENDING** (queued). `queue_processor` is **per-group FIFO**,
-  triggered on release/sync/unfreeze (+ 15s safety sweep), head-of-line per group.
+- No eligible node → session **PENDING** (queued). `queue_processor` is **FIFO keyed on the
+  sorted requested-device set**, triggered on release/sync/unfreeze (+ 15s safety sweep),
+  head-of-line per device set (sessions wanting different sets never block each other).
 - Client may **pin** a node (`--node`); frozen/missing → reject, busy → queue for that node.
 
 **Freezing:** a client with an ACTIVE session freezes that session's node
@@ -124,12 +133,11 @@ agent and what the client's attach command uses.
 ## 5. API surface (manager)
 
 ```
-# client-facing (X-Client-Id; groups/devices/nodes need no header)
-POST   /api/v1/sessions                 {group_name, node?}
+# client-facing (X-Client-Id; devices/nodes need no header)
+POST   /api/v1/sessions                 {devices: [name, ...], node?}
 GET    /api/v1/sessions[/{id}]
 POST   /api/v1/sessions/{id}/freeze
 DELETE /api/v1/sessions/{id}            (release)
-GET/POST/PUT/DELETE /api/v1/groups[/{name}]
 GET    /api/v1/devices                  (list; filters node_id/status/class)
 GET/PATCH/DELETE /api/v1/devices/{node}/{logical_name}
 POST   /api/v1/devices/{node}/{logical_name}/rename  {name, force}
@@ -220,8 +228,8 @@ checks via `httpx.MockTransport` (typed responses, 204, `NameConflict`).
 ## 8. Open items / not yet done
 
 - **No automated tests.** `tests/` packages are empty. Good targets: `eligible_nodes` ranking,
-  per-group FIFO queue, rename/conflict + portability, allocation rollback. The shared contract
-  makes request/response fixtures trivial.
+  per-device-set FIFO queue, rename/conflict + portability, allocation rollback. The shared
+  contract makes request/response fixtures trivial.
 - **Contract drift guard:** the API contract is single-sourced, but nothing asserts the agent
   scan output round-trips `DeviceInfoPayload` in CI — add that.
 - **Manager↔agent networking** in the dockerized topology depends on the agent advertising a

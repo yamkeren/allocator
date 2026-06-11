@@ -1,6 +1,6 @@
 """Core allocation algorithm (single-node model).
 
-A group is a list of logical names. A session is satisfied by ONE node that has
+A session requests a list of logical names. It is satisfied by ONE node that has
 a FREE device for every name. Among eligible nodes we pick the one with the
 fewest TOTAL devices (least "additional" hardware tied up). If no node is
 eligible the session is left PENDING and the queue processor retries it later.
@@ -19,7 +19,6 @@ from sqlalchemy.exc import DBAPIError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from allocator_manager.models.device import Device, DeviceStatus
-from allocator_manager.models.group import Group, GroupDevice
 from allocator_manager.models.node import Node, NodeStatus
 from allocator_manager.models.session import Session, SessionStatus
 from allocator_manager.models.session_device import SessionDevice, SessionDeviceStatus
@@ -40,17 +39,6 @@ class _DeviceRaced(Exception):
     Raised inside the reservation savepoint so it rolls back cleanly; the
     caller treats it as "not available now" and queues the session.
     """
-
-
-async def group_names(db: AsyncSession, group_name: str) -> list[str]:
-    """Ordered list of logical names that define a group."""
-    rows = (await db.execute(
-        select(GroupDevice.logical_name)
-        .join(Group, Group.id == GroupDevice.group_id)
-        .where(Group.name == group_name)
-        .order_by(GroupDevice.ordinal)
-    )).scalars().all()
-    return list(rows)
 
 
 async def eligible_nodes(
@@ -104,9 +92,9 @@ class AllocationService:
         Returns True if the session reached a terminal-for-the-queue state
         (ACTIVE or FAILED), False if it remains PENDING (no eligible node yet).
         """
-        names = await group_names(self._db, session.group_name)
+        names = list(session.requested_devices)
         if not names:
-            await self._fail_session(session, "group_empty", f"Group {session.group_name!r} has no devices")
+            await self._fail_session(session, "no_devices", "Session requested no devices")
             return True
 
         session_devices = await self._reserve(session, names)
@@ -114,7 +102,7 @@ class AllocationService:
             session.status = SessionStatus.PENDING
             session.updated_at = datetime.now(UTC)
             await self._db.commit()
-            log.info("session_queued", session_id=str(session.id), group=session.group_name)
+            log.info("session_queued", session_id=str(session.id), devices=names)
             return False
 
         try:

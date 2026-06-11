@@ -2,7 +2,7 @@
 
 Usage:
     with AllocatorClient(url) as client:
-        with AllocatorSession(client, "wifi_lab") as session:
+        with AllocatorSession(client, ["wifi_0", "hid_1"]) as session:
             # devices are usbip-attached; session.devices has the attach info
             ...
         # on exit: usbip detach + DELETE /sessions
@@ -32,21 +32,21 @@ class AttachedDevice:
 @dataclass
 class SessionInfo:
     session_id: str
-    group_name: str
+    requested_devices: list[str]
     status: str
     devices: list[AttachedDevice] = field(default_factory=list)
 
 
 class AllocatorSession:
-    """Allocates a group, usbip-attaches its devices, and cleans up on exit."""
+    """Allocates a device list, usbip-attaches them, and cleans up on exit."""
 
-    def __init__(self, client: AllocatorClient, group_name: str) -> None:
+    def __init__(self, client: AllocatorClient, devices: list[str]) -> None:
         self._client = client
-        self._group_name = group_name
+        self._devices = devices
         self._session: SessionInfo | None = None
 
     def __enter__(self) -> SessionInfo:
-        data = self._client.create_session(self._group_name)
+        data = self._client.create_session(self._devices)
         if data.status == "FAILED":
             raise RuntimeError(f"Session {data.session_id} failed: {data.failure_reason or ''}")
         if data.status != "ACTIVE":
@@ -72,7 +72,7 @@ class AllocatorSession:
 
         self._session = SessionInfo(
             session_id=data.session_id,
-            group_name=self._group_name,
+            requested_devices=list(self._devices),
             status="ACTIVE",
             devices=attached,
         )

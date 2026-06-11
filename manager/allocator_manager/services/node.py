@@ -99,7 +99,7 @@ class NodeService:
             # Identity is the fingerprint, not the regenerated UUID or the
             # volatile auto-assigned logical_name. Matching here keeps a
             # physical device's row (and id) stable across reconnects, so
-            # group_devices references survive a device refresh.
+            # in-flight session_devices references survive a device refresh.
             device = (await self._db.execute(
                 select(Device).where(
                     Device.fingerprint == dev_info.fingerprint,
@@ -196,7 +196,7 @@ class NodeService:
         A device is removed only if it is FREE and not referenced by ANY
         session_device row (the FK has no ON DELETE, so a lingering row from a
         released session would block the delete — we skip it rather than error).
-        Groups reference names, not device rows, so they don't pin a device
+        Sessions request names, not device rows, so they don't pin a device
         here. ALLOCATED / ERROR devices are left for the session-expiry and
         zombie-cleanup tasks.
         Identity is the fingerprint, matching the upsert above. The device's

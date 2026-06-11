@@ -24,14 +24,13 @@ async def create_session(
 @router.get("", response_model=SessionListResponse)
 async def list_sessions(
     session_status: str | None = None,
-    group_name: str | None = None,
     limit: int = 50,
     offset: int = 0,
     client_id: str = Depends(require_client),
     db: AsyncSession = Depends(get_db),
 ) -> SessionListResponse:
     return await SessionService(db).list(
-        client_id=client_id, status=session_status, group_name=group_name, limit=limit, offset=offset
+        client_id=client_id, status=session_status, limit=limit, offset=offset
     )
 
 

@@ -11,7 +11,6 @@ import structlog
 
 from allocator_client.config import Config
 from allocator_contract.device import DeviceListResponse, DeviceRename, DeviceResponse
-from allocator_contract.group import GroupCreate, GroupListResponse, GroupResponse
 from allocator_contract.node import NodeListResponse, NodeResponse
 from allocator_contract.session import (
     SessionCreate,
@@ -61,8 +60,8 @@ class AllocatorClient:
 
     # Sessions
 
-    def create_session(self, group_name: str, node: str | None = None) -> SessionResponse:
-        body = SessionCreate(group_name=group_name, node=node)
+    def create_session(self, devices: list[str], node: str | None = None) -> SessionResponse:
+        body = SessionCreate(devices=devices, node=node)
         return _parse(self._http.post("/api/v1/sessions", json=body.model_dump()), SessionResponse)
 
     def get_session(self, session_id: str) -> SessionResponse:
@@ -75,29 +74,12 @@ class AllocatorClient:
         self._http.delete(f"/api/v1/sessions/{session_id}").raise_for_status()
 
     def list_sessions(
-        self, status: str | None = None, group_name: str | None = None, limit: int = 50
+        self, status: str | None = None, limit: int = 50
     ) -> SessionListResponse:
         params: dict = {"limit": limit}
         if status:
             params["session_status"] = status
-        if group_name:
-            params["group_name"] = group_name
         return _parse(self._http.get("/api/v1/sessions", params=params), SessionListResponse)
-
-    # Groups
-
-    def create_group(self, name: str, devices: list[str], description: str = "") -> GroupResponse:
-        body = GroupCreate(name=name, devices=devices, description=description or None)
-        return _parse(self._http.post("/api/v1/groups", json=body.model_dump()), GroupResponse)
-
-    def get_group(self, name: str) -> GroupResponse:
-        return _parse(self._http.get(f"/api/v1/groups/{name}"), GroupResponse)
-
-    def list_groups(self) -> GroupListResponse:
-        return _parse(self._http.get("/api/v1/groups"), GroupListResponse)
-
-    def delete_group(self, name: str) -> None:
-        self._http.delete(f"/api/v1/groups/{name}").raise_for_status()
 
     # Devices
 

@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from allocator_manager.models.device import Device, DeviceStatus
-from allocator_manager.models.group import Group
 from allocator_manager.models.node import Node
 from allocator_manager.models.session import Session, SessionStatus
 from allocator_manager.models.session_device import SessionDevice, SessionDeviceStatus
@@ -18,7 +17,6 @@ from allocator_contract.session import (
     SessionListResponse,
     SessionResponse,
 )
-from allocator_manager.services.allocation import group_names
 
 log = structlog.get_logger(__name__)
 
@@ -48,7 +46,7 @@ def _session_to_response(session: Session, nodes: dict) -> SessionResponse:
     return SessionResponse(
         session_id=str(session.id),
         client_id=session.client_id,
-        group_name=session.group_name,
+        requested_devices=list(session.requested_devices),
         status=session.status.value,
         node_name=alloc_node.name if alloc_node else None,
         failure_reason=session.failure_reason,
@@ -62,23 +60,13 @@ class SessionService:
         self._db = db
 
     async def create(self, client_id: str, request: SessionCreate) -> SessionResponse:
-        group = (await self._db.execute(
-            select(Group).where(Group.name == request.group_name)
-        )).scalar_one_or_none()
-        if not group:
-            raise HTTPException(
-                status_code=http_status.HTTP_404_NOT_FOUND,
-                detail=f"Group {request.group_name!r} not found",
-            )
-
         requested_node_id = None
         if request.node:
-            requested_node_id = await self._validate_pinned_node(request.node, group.name)
+            requested_node_id = await self._validate_pinned_node(request.node, request.devices)
 
         session = Session(
             client_id=client_id,
-            group_id=group.id,
-            group_name=group.name,
+            requested_devices=list(request.devices),
             status=SessionStatus.PENDING,
             requested_node_id=requested_node_id,
         )
@@ -95,7 +83,7 @@ class SessionService:
         full = await self._load_session(str(session.id))
         return await self._load_session_response(full)
 
-    async def _validate_pinned_node(self, node_name: str, group_name: str) -> uuid.UUID:
+    async def _validate_pinned_node(self, node_name: str, names: list[str]) -> uuid.UUID:
         node = (await self._db.execute(
             select(Node).where(Node.name == node_name)
         )).scalar_one_or_none()
@@ -107,7 +95,6 @@ class SessionService:
             raise HTTPException(
                 status_code=http_status.HTTP_409_CONFLICT, detail=f"Node {node_name!r} is frozen"
             )
-        names = await group_names(self._db, group_name)
         present = set((await self._db.execute(
             select(Device.logical_name).where(Device.node_id == node.id)
         )).scalars().all())
@@ -149,7 +136,6 @@ class SessionService:
         self,
         client_id: str,
         status: str | None,
-        group_name: str | None,
         limit: int,
         offset: int,
     ) -> SessionListResponse:
@@ -160,8 +146,6 @@ class SessionService:
         )
         if status:
             q = q.where(Session.status == status)
-        if group_name:
-            q = q.where(Session.group_name == group_name)
         q = q.order_by(Session.created_at.desc()).limit(limit).offset(offset)
         sessions = (await self._db.execute(q)).scalars().all()
         items = [await self._load_session_response(s) for s in sessions]

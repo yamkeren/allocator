@@ -5,10 +5,10 @@
 # Allocator
 
 Distributed USB resource orchestration. Multiple clients share a pool of physical USB devices
-across a cluster of Linux nodes: the manager allocates named **groups** of devices to client
-**sessions**, and the devices are carried to the client over **USB/IP** (`usbip bind`/`attach`).
-It is a correctness-first scheduler — atomic reservation, row locking, a saga with rollback,
-leasing, a wait queue, and node freezing.
+across a cluster of Linux nodes: a client opens a **session** with a list of device names, the
+manager allocates them together on one node, and the devices are carried to the client over
+**USB/IP** (`usbip bind`/`attach`). It is a correctness-first scheduler — atomic reservation,
+row locking, a saga with rollback, leasing, a wait queue, and node freezing.
 
 ## Architecture
 
@@ -53,27 +53,25 @@ assigns a **per-node** name like `wifi_0`/`hid_1`; a client can give it a **cust
 follows the physical device across nodes. Status is `FREE`/`ALLOCATED`/`ERROR`. Names are
 unique **per node**, not globally.
 
-**Group** — an ordered **list of logical names** (a template). It is resolved to actual devices
-on a single node when a session is created — groups are not bound to specific devices.
-
-**Session** — a lease over a group's devices on **one node**. Status is
+**Session** — a lease over a requested **list of device names** on **one node**. The names are
+resolved to actual devices on a single node when the session is created. Status is
 `PENDING` (queued, waiting for a node) → `ACTIVE` → `RELEASED`/`FAILED`. Owned by the client's
 identity (its hostname).
 
 ## Allocation algorithm
 
-A session is satisfied by a **single node** that has every group device free.
+A session is satisfied by a **single node** that has every requested device free.
 
 1. **Select node** — candidate nodes are `ONLINE`, **not frozen**, and have a `FREE` device for
-   **every** name in the group. Among candidates, pick the one with the **fewest total
+   **every** requested name. Among candidates, pick the one with the **fewest total
    devices** (least extra hardware tied up). A client may **pin** a node instead.
 2. **Reserve** (one DB transaction) — lock the chosen devices `FOR UPDATE NOWAIT`, re-validate
    `FREE`, mark `ALLOCATED`, insert `session_devices`.
 3. **Bind** (saga, outside the txn) — call the node agent's `usbip bind` per device; on any
    failure, reverse-order unbind + free everything, session → `FAILED`.
-4. **Queue** — if no node can satisfy the group right now, the session is `PENDING`. A
-   **per-group FIFO** queue retries it when a node frees up (release / device sync / unfreeze),
-   plus a periodic safety sweep.
+4. **Queue** — if no node can satisfy the request right now, the session is `PENDING`. A FIFO
+   queue **keyed on the requested device set** retries it when a node frees up (release / device
+   sync / unfreeze), plus a periodic safety sweep.
 
 **Freezing** — a client holding an `ACTIVE` session can freeze that session's node; it's then
 excluded from all new sessions and **stays frozen after release**, until **anyone** unfreezes it.
@@ -156,9 +154,8 @@ allocator device list
 # 2. (optional) give a device a custom, portable name
 allocator device name <node> wifi_0 lab_wifi      # prompts on a name clash
 
-# 3. define a group as a list of names, then open a session
-allocator group create wifi-lab --devices lab_wifi,hid_0
-allocator session create --group wifi-lab [--node <node>]
+# 3. open a session with a list of device names
+allocator session create --devices lab_wifi,hid_0 [--node <node>]
 
 # 4. attach the devices the session hands out (printed per device)
 sudo usbip attach -r <node_ip> -b <bus_id>
@@ -166,22 +163,18 @@ sudo usbip attach -r <node_ip> -b <bus_id>
 allocator session release <session-id>
 ```
 
-If no node can satisfy the group, the session is `PENDING` and starts automatically when one
+If no node can satisfy the request, the session is `PENDING` and starts automatically when one
 frees up.
 
 ### CLI reference
 
 ```bash
 # sessions
-allocator session create --group G [--node N]    # allocate (pin optional)
+allocator session create --devices a,b,c [--node N]   # allocate (pin optional)
 allocator session list [--status ACTIVE|PENDING|RELEASED|FAILED]
 allocator session show <id>
 allocator session freeze <id>                     # freeze this session's node
 allocator session release <id>
-
-# groups
-allocator group create NAME --devices a,b,c
-allocator group list / show NAME / delete NAME
 
 # devices (names are per-node)
 allocator device list [--node N] [--status S] [--class C]
@@ -202,26 +195,25 @@ models:
 from allocator_client import AllocatorClient
 
 with AllocatorClient("http://manager:8000") as c:   # identity = hostname
-    s = c.create_session("wifi-lab")                # -> SessionResponse
+    s = c.create_session(["lab_wifi", "hid_0"])     # -> SessionResponse
     for d in s.devices:
         print(d.logical_name, d.usbip_attach_command)
     c.release_session(s.session_id)
 ```
 
-`AllocatorSession` is a context manager that allocates a group, `usbip attach`es each device,
-and detaches + releases on exit (with rollback if an attach fails). `rename_device` raises
-`allocator_client.NameConflict` on a name clash. See [client/README.md](client/README.md).
+`AllocatorSession` is a context manager that allocates a list of devices, `usbip attach`es each
+device, and detaches + releases on exit (with rollback if an attach fails). `rename_device`
+raises `allocator_client.NameConflict` on a name clash. See [client/README.md](client/README.md).
 
 ## REST API
 
 | Endpoint | Auth | Description |
 |---|---|---|
 | `GET /health` | none | Health check |
-| `POST /api/v1/sessions` | `X-Client-Id` | Create session `{group_name, node?}` |
+| `POST /api/v1/sessions` | `X-Client-Id` | Create session `{devices: [...], node?}` |
 | `GET /api/v1/sessions[/{id}]` | `X-Client-Id` | List / get your sessions |
 | `POST /api/v1/sessions/{id}/freeze` | `X-Client-Id` | Freeze this session's node |
 | `DELETE /api/v1/sessions/{id}` | `X-Client-Id` | Release session |
-| `GET/POST/PUT/DELETE /api/v1/groups[/{name}]` | none | Group CRUD |
 | `GET /api/v1/devices` | none | List devices (filters) |
 | `GET/PATCH/DELETE /api/v1/devices/{node}/{name}` | none | Per-node device ops |
 | `POST /api/v1/devices/{node}/{name}/rename` | none | Set a custom name `{name, force}` |
@@ -270,12 +262,12 @@ JSON file at `~/.config/allocator/config.json` (manage with `allocator config se
 
 ```
 nodes ─< devices            device_names (fingerprint → custom name)
-groups ─< group_devices (logical_name list)
 sessions ─< session_devices >─ devices
 ```
 
 - `devices`: `UNIQUE(node_id, logical_name)` and `UNIQUE(node_id, fingerprint)` — per-node.
-- `group_devices` stores logical **names**, not device FKs (a group is a template).
+- `sessions.requested_devices` is a `text[]` of the logical **names** the client asked for
+  (resolved to devices at allocation time).
 - `nodes.frozen`; `sessions.status ∈ {PENDING,ACTIVE,RELEASED,FAILED}` + `node_id`/`requested_node_id`.
 - `device_names` is durable, portable name memory keyed by fingerprint.
 

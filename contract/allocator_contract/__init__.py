@@ -11,12 +11,6 @@ from allocator_contract.device import (
     DeviceRename,
     DeviceResponse,
 )
-from allocator_contract.group import (
-    GroupCreate,
-    GroupListResponse,
-    GroupResponse,
-    GroupUpdate,
-)
 from allocator_contract.node import (
     DeviceInfoPayload,
     DeviceSyncPayload,
@@ -47,10 +41,6 @@ __all__ = [
     "DevicePatch",
     "DeviceRename",
     "DeviceResponse",
-    "GroupCreate",
-    "GroupListResponse",
-    "GroupResponse",
-    "GroupUpdate",
     "DeviceInfoPayload",
     "DeviceSyncPayload",
     "DeviceSyncResponse",

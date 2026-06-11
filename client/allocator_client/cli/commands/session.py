@@ -70,17 +70,18 @@ def _detach_recorded(session_id: str) -> None:
 
 @app.command("create")
 def create_session(
-    group: str = typer.Option(..., "--group", "-g", help="Group name to allocate"),
+    devices: str = typer.Option(..., "--devices", "-d", help="Comma-separated logical device names to allocate together"),
     node: str = typer.Option(None, "--node", "-n", help="Pin the session to a specific node"),
     attach: bool = typer.Option(False, "--attach", help="Also usbip-attach each device locally (needs root/sudo)"),
 ) -> None:
-    """Request a session for a group (allocated atomically on a single node)."""
+    """Request a session for a list of devices (allocated atomically on a single node)."""
+    device_list = [d.strip() for d in devices.split(",") if d.strip()]
     with get_client() as client:
-        s = client.create_session(group, node=node)
+        s = client.create_session(device_list, node=node)
         on = f"  node={s.node_name}" if s.node_name else ""
         console.print(f"[green]Session:[/green] {s.session_id}  status={s.status}{on}")
         if s.status == "PENDING":
-            console.print("[yellow]Queued[/yellow] — waiting for a node that can satisfy the group.")
+            console.print("[yellow]Queued[/yellow] — waiting for a node that can satisfy the request.")
         if s.devices:
             t = Table("Device", "Node IP", "Bus ID", "Attach Command")
             for dev in s.devices:
@@ -112,9 +113,15 @@ def list_sessions(
     """List your sessions."""
     with get_client() as client:
         data = client.list_sessions(status=status)
-        t = Table("Session ID", "Group", "Status", "Node", "Created")
+        t = Table("Session ID", "Devices", "Status", "Node", "Created")
         for s in data.items:
-            t.add_row(s.session_id, s.group_name, s.status, s.node_name or "", str(s.created_at))
+            t.add_row(
+                s.session_id,
+                ", ".join(s.requested_devices),
+                s.status,
+                s.node_name or "",
+                str(s.created_at),
+            )
         console.print(t)
 
 

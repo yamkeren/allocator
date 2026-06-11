@@ -4,7 +4,7 @@ Defaults live in code; the file at ``~/.config/allocator/config.json`` holds
 only values you've explicitly set. ``set``/``unset`` persist immediately:
 
     cfg = Config()
-    cfg.set("url", "http://allocator.local")   # written to the JSON file
+    cfg.set("url", "http://localhost")   # written to the JSON file
     cfg.get("url")                              # -> the stored value (or default)
 """
 

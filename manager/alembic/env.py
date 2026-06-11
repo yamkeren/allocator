@@ -10,7 +10,6 @@ from allocator_manager.config import settings
 from allocator_manager.database import Base  # noqa: F401
 import allocator_manager.models.device  # noqa: F401
 import allocator_manager.models.device_name  # noqa: F401
-import allocator_manager.models.group  # noqa: F401
 import allocator_manager.models.node  # noqa: F401
 import allocator_manager.models.session  # noqa: F401
 import allocator_manager.models.session_device  # noqa: F401

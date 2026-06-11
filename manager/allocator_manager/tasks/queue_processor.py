@@ -1,9 +1,11 @@
-"""Per-group FIFO queue for PENDING sessions.
+"""Per-request-set FIFO queue for PENDING sessions.
 
 When a node frees up (session release, device sync, or unfreeze) a queued
-session may become allocatable. `process_queue` walks PENDING sessions oldest
--first within each group and starts the ones whose group can now be satisfied,
-stopping at the first that still can't (head-of-line ordering per group).
+session may become allocatable. `process_queue` groups PENDING sessions by their
+sorted requested-device list and, within each set, walks them oldest-first,
+starting the ones that can now be satisfied and stopping at the first that still
+can't (head-of-line ordering per identical device set). Sessions requesting
+different device sets are independent and never block each other.
 """
 
 import asyncio
@@ -27,25 +29,32 @@ _lock = asyncio.Lock()
 _inflight: set[asyncio.Task] = set()
 
 
+def _set_key(session: Session) -> tuple[str, ...]:
+    return tuple(sorted(session.requested_devices))
+
+
 async def process_queue() -> None:
     async with _lock:
         async with AsyncSessionLocal() as db:
             pending = (await db.execute(
                 select(Session)
                 .where(Session.status == SessionStatus.PENDING)
-                .order_by(Session.group_name, Session.created_at)
+                .order_by(Session.created_at)
             )).scalars().all()
             if not pending:
                 return
 
+            # Group by identical requested-device set; within a set, oldest first.
+            ordered = sorted(pending, key=lambda s: (_set_key(s), s.created_at))
+
             from allocator_manager.services.allocation import AllocationService
             svc = AllocationService(db)
             started = 0
-            for _group, sessions in groupby(pending, key=lambda s: s.group_name):
+            for _key, sessions in groupby(ordered, key=_set_key):
                 for session in sessions:  # oldest first
                     await svc.allocate(session)
                     if session.status == SessionStatus.PENDING:
-                        break  # head-of-line: don't skip ahead within a group
+                        break  # head-of-line: don't skip ahead within a set
                     if session.status == SessionStatus.ACTIVE:
                         started += 1
             if started:

@@ -2,7 +2,7 @@
 
 import typer
 
-from allocator_client.cli.commands import config, device, group, node, session
+from allocator_client.cli.commands import config, device, node, session
 
 app = typer.Typer(
     name="allocator",
@@ -11,7 +11,6 @@ app = typer.Typer(
 )
 
 app.add_typer(session.app, name="session")
-app.add_typer(group.app, name="group")
 app.add_typer(device.app, name="device")
 app.add_typer(node.app, name="node")
 app.add_typer(config.app, name="config")

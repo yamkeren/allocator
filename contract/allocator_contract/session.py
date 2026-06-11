@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 
 class SessionDeviceAttachInfo(BaseModel):
@@ -18,7 +19,7 @@ class SessionDeviceAttachInfo(BaseModel):
 class SessionResponse(BaseModel):
     session_id: str
     client_id: str
-    group_name: str
+    requested_devices: list[str]  # logical names the client asked for
     status: str                  # PENDING | ACTIVE | RELEASED | FAILED
     node_name: str | None        # the node this session was allocated on (None while PENDING)
     failure_reason: str | None
@@ -34,5 +35,8 @@ class SessionListResponse(BaseModel):
 
 
 class SessionCreate(BaseModel):
-    group_name: str
+    # Ad-hoc list of logical device names to allocate together on one node.
+    devices: list[Annotated[str, Field(pattern=r"^[a-z0-9_]+$", max_length=100)]] = Field(
+        ..., min_length=1
+    )
     node: str | None = None      # optional node name to pin the session to

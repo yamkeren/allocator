@@ -99,30 +99,10 @@ def upgrade() -> None:
     op.create_index("idx_device_names_fingerprint", "device_names", ["fingerprint"])
 
     op.create_table(
-        "groups",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("name", sa.String(255), nullable=False, unique=True),
-        sa.Column("description", sa.Text, nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
-    )
-
-    op.create_table(
-        "group_devices",
-        sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
-        sa.Column("group_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("groups.id", ondelete="CASCADE"), nullable=False),
-        sa.Column("logical_name", sa.String(255), nullable=False),
-        sa.Column("ordinal", sa.Integer, nullable=False, server_default="0"),
-    )
-    op.create_unique_constraint("uq_group_logical_name", "group_devices", ["group_id", "logical_name"])
-    op.create_index("idx_group_devices_group_id", "group_devices", ["group_id"])
-
-    op.create_table(
         "sessions",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True, server_default=sa.text("gen_random_uuid()")),
         sa.Column("client_id", sa.Text, nullable=False),
-        sa.Column("group_id", postgresql.UUID(as_uuid=True), sa.ForeignKey("groups.id"), nullable=False),
-        sa.Column("group_name", sa.String(255), nullable=False),
+        sa.Column("requested_devices", postgresql.ARRAY(sa.String(255)), nullable=False, server_default="{}"),
         sa.Column("status", _enum("sessionstatus"), nullable=False, server_default="PENDING"),
         sa.Column("requested_node_id", postgresql.UUID(as_uuid=True), nullable=True),
         sa.Column("node_id", postgresql.UUID(as_uuid=True), nullable=True),
@@ -133,7 +113,6 @@ def upgrade() -> None:
     )
     op.create_index("idx_sessions_status", "sessions", ["status"])
     op.create_index("idx_sessions_client_id", "sessions", ["client_id"])
-    op.create_index("idx_sessions_group_id", "sessions", ["group_id"])
 
     op.create_table(
         "session_devices",
@@ -158,8 +137,6 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_table("session_devices")
     op.drop_table("sessions")
-    op.drop_table("group_devices")
-    op.drop_table("groups")
     op.drop_table("device_names")
     op.drop_table("devices")
     op.drop_table("nodes")
