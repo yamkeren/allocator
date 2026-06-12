@@ -159,8 +159,8 @@ POST   /internal/v1/nodes/{id}/devices/sync
 
 1. **Big refactor** of naming/allocation/auth (all the §4 behaviors): fingerprint identity,
    per-node names, portable custom names + rename/conflict, single-node allocation with the
-   per-group FIFO queue, node freezing, hostname-based client identity (API key removed),
-   richer device classification.
+   per-group FIFO queue (since replaced by a global skip-FIFO), node freezing,
+   hostname-based client identity (API key removed), richer device classification.
 2. **Agent IP fix** — register the real LAN IP instead of `127.0.1.1` (+ `ADVERTISE_IP`).
 3. **Shared typed contract** — extracted `contract/` (`allocator-contract`); manager imports
    it (deleted `schemas/`), agent sends typed payloads, **client + CLI fully typed** (no more
