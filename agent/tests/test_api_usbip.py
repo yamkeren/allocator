@@ -7,7 +7,7 @@ side effects happen.
 import httpx
 import pytest
 
-from allocator_agent.components.usbip_controller import BindResult, UsbipController, UsbipError
+from allocator_agent.components.usbip_controller import BindResult, UnbindResult, UsbipController, UsbipError
 from allocator_agent.main import create_app
 
 
@@ -18,7 +18,10 @@ async def api():
         yield client
 
 
-async def test_health(api):
+async def test_health(api, monkeypatch):
+    async def fake_check():
+        return True
+    monkeypatch.setattr(UsbipController, "check_available", staticmethod(fake_check))
     resp = await api.get("/api/v1/health")
     assert resp.status_code == 200
 
@@ -42,12 +45,11 @@ async def test_bind_failure_maps_to_500(api, monkeypatch):
         "bus_id": "1-1.2", "logical_name": "wifi_0", "session_id": "s1",
     })
     assert resp.status_code == 500
-    assert "bind exploded" in resp.json()["detail"]
+    assert resp.json()["detail"] == "usbip bind failed: bind exploded"
 
 
 async def test_unbind_success(api, monkeypatch):
     async def ok(self, bus_id):
-        from allocator_agent.components.usbip_controller import UnbindResult
         return UnbindResult()
     monkeypatch.setattr(UsbipController, "unbind", ok)
     resp = await api.post("/api/v1/usbip/unbind", json={
