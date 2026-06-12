@@ -7,14 +7,21 @@ from datetime import UTC, datetime
 
 import pytest
 
-from allocator_contract.device import DeviceCreate, DeviceResponse
+from allocator_contract.device import DeviceCreate, DeviceListResponse, DeviceResponse
 from allocator_contract.node import (
     DeviceInfoPayload,
     DeviceSyncPayload,
     NodeHeartbeatPayload,
+    NodeListResponse,
     NodeRegisterPayload,
+    NodeResponse,
 )
-from allocator_contract.session import SessionDeviceAttachInfo, SessionResponse
+from allocator_contract.session import (
+    SessionCreate,
+    SessionDeviceAttachInfo,
+    SessionListResponse,
+    SessionResponse,
+)
 from allocator_contract.usbip import BindRequest, UnbindRequest
 
 SAMPLES = [
@@ -48,6 +55,26 @@ SAMPLES = [
         mac_address=None, device_class="WIFI", status="FREE",
         usbip_bus_id="1-1.2", created_at=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
     ),
+]
+
+_SESSION = SAMPLES[-2]  # SessionResponse
+_DEVICE = SAMPLES[-1]   # DeviceResponse
+
+_NODE = NodeResponse(
+    node_id="n1", name="lab-1", hostname="lab-1.local",
+    ip_address="192.168.1.5", agent_port=5000,
+    agent_url="http://192.168.1.5:5000", status="ONLINE",
+    last_heartbeat=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+    agent_version=None, frozen=False,
+    created_at=datetime(2026, 6, 12, 10, 0, tzinfo=UTC),
+)
+
+SAMPLES += [
+    SessionCreate(devices=["wifi_0", "hid_1"], node="lab-1"),
+    _NODE,
+    NodeListResponse(items=[_NODE], total=1),
+    SessionListResponse(items=[_SESSION], total=1),
+    DeviceListResponse(items=[_DEVICE], total=1),
 ]
 
 
