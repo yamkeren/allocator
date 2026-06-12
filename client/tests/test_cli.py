@@ -3,7 +3,6 @@ command module imported it; no network.
 """
 
 import json
-from contextlib import contextmanager
 
 import pytest
 from typer.testing import CliRunner
