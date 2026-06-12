@@ -1,15 +1,16 @@
-"""Per-request-set FIFO queue for PENDING sessions.
+"""Global skip-FIFO queue for PENDING sessions.
 
 When a node frees up (session release, device sync, or unfreeze) a queued
-session may become allocatable. `process_queue` groups PENDING sessions by their
-sorted requested-device list and, within each set, walks them oldest-first,
-starting the ones that can now be satisfied and stopping at the first that still
-can't (head-of-line ordering per identical device set). Sessions requesting
-different device sets are independent and never block each other.
+session may become allocatable. `process_queue` walks all PENDING sessions
+oldest-first (global FIFO by `created_at`) and tries to start each one; a
+session that still cannot be satisfied is skipped and never blocks the
+sessions behind it. Age is the global priority: older sessions are always
+attempted before newer ones. Starvation of multi-device requests by newer
+subset requests is an accepted risk
+(docs/superpowers/specs/2026-06-12-global-fifo-design.md).
 """
 
 import asyncio
-from itertools import groupby
 
 import structlog
 from sqlalchemy import select
@@ -29,10 +30,6 @@ _lock = asyncio.Lock()
 _inflight: set[asyncio.Task] = set()
 
 
-def _set_key(session: Session) -> tuple[str, ...]:
-    return tuple(sorted(session.requested_devices))
-
-
 async def process_queue() -> None:
     async with _lock:
         async with AsyncSessionLocal() as db:
@@ -44,19 +41,13 @@ async def process_queue() -> None:
             if not pending:
                 return
 
-            # Group by identical requested-device set; within a set, oldest first.
-            ordered = sorted(pending, key=lambda s: (_set_key(s), s.created_at))
-
             from allocator_manager.services.allocation import AllocationService
             svc = AllocationService(db)
             started = 0
-            for _key, sessions in groupby(ordered, key=_set_key):
-                for session in sessions:  # oldest first
-                    await svc.allocate(session)
-                    if session.status == SessionStatus.PENDING:
-                        break  # head-of-line: don't skip ahead within a set
-                    if session.status == SessionStatus.ACTIVE:
-                        started += 1
+            for session in pending:  # oldest first; unsatisfiable are skipped
+                await svc.allocate(session)
+                if session.status == SessionStatus.ACTIVE:
+                    started += 1
             if started:
                 log.info("queue_processed", started=started)
 
