@@ -1,7 +1,7 @@
 from datetime import datetime
 from typing import Annotated
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SessionDeviceAttachInfo(BaseModel):
@@ -40,3 +40,13 @@ class SessionCreate(BaseModel):
         ..., min_length=1
     )
     node: str | None = None      # optional node name to pin the session to
+
+    @field_validator("devices")
+    @classmethod
+    def _reject_duplicates(cls, v: list[str]) -> list[str]:
+        # A duplicate name would reserve and usbip-bind the same device twice.
+        seen: set[str] = set()
+        dupes = sorted({d for d in v if d in seen or seen.add(d)})
+        if dupes:
+            raise ValueError(f"duplicate device names: {', '.join(dupes)}")
+        return v

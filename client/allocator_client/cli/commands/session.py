@@ -28,7 +28,7 @@ def _attach_devices(session_id: str, devices) -> None:
     """usbip attach each device locally and record the assigned ports.
 
     Detach later uses the recorded (device, port) list directly — never guessing
-    from `usbip port` — so an attached group is always fully detachable.
+    from `usbip port` — so an attached session is always fully detachable.
     """
     sudo = _need_sudo()
     usbip_helper.ensure_vhci(sudo=sudo)
@@ -76,6 +76,13 @@ def create_session(
 ) -> None:
     """Request a session for a list of devices (allocated atomically on a single node)."""
     device_list = [d.strip() for d in devices.split(",") if d.strip()]
+    if not device_list:
+        raise typer.BadParameter("provide at least one device name", param_hint="--devices")
+    dupes = sorted({d for d in device_list if device_list.count(d) > 1})
+    if dupes:
+        raise typer.BadParameter(
+            f"duplicate device names: {', '.join(dupes)}", param_hint="--devices"
+        )
     with get_client() as client:
         s = client.create_session(device_list, node=node)
         on = f"  node={s.node_name}" if s.node_name else ""
