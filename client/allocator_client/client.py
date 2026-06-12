@@ -44,10 +44,12 @@ class AllocatorClient:
         client_id: str | None = None,
         timeout: float = 30.0,
         config: Config | None = None,
+        transport: httpx.BaseTransport | None = None,
     ) -> None:
         # Values come from the JSON config file; args override them. `config`
         # is exposed so callers can read/persist values:
         #   client.config.set("url", "http://allocator.local")
+        # `transport` exists for tests (httpx.MockTransport).
         self.config = config or Config()
         self._base_url = (manager_url or self.config.get("url")).rstrip("/")
         self._client_id = client_id or self.config.get("client_id")
@@ -56,6 +58,7 @@ class AllocatorClient:
             base_url=self._base_url,
             headers={"X-Client-Id": self._client_id},
             timeout=timeout,
+            transport=transport,
         )
 
     # Sessions
