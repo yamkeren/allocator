@@ -228,9 +228,9 @@ checks via `httpx.MockTransport` (typed responses, 204, `NameConflict`).
 
 ## 8. Open items / not yet done
 
-- **No automated tests.** `tests/` packages are empty. Good targets: `eligible_nodes` ranking,
-  per-device-set FIFO queue, rename/conflict + portability, allocation rollback. The shared
-  contract makes request/response fixtures trivial.
+- **Few automated tests.** Only the queue processor is covered
+  (`manager/tests/test_queue_processor.py`: global skip-FIFO ordering/skip). Good targets:
+  `eligible_nodes` ranking, rename/conflict + portability, allocation rollback.
 - **Contract drift guard:** the API contract is single-sourced, but nothing asserts the agent
   scan output round-trips `DeviceInfoPayload` in CI — add that.
 - **Manager↔agent networking** in the dockerized topology depends on the agent advertising a
