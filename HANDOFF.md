@@ -5,7 +5,7 @@ _Last updated: 2026-06-04_
 > **2026-06-04 — Groups removed.** The `group` abstraction is gone end-to-end. A client now
 > starts a session with an **ad-hoc list of device names** (`session create --devices a,b,c`)
 > instead of a saved group name. Sessions store the request in a `sessions.requested_devices`
-> `text[]` column; the wait queue is now keyed on the **sorted requested-device set** (was
+> `varchar(255)[]` column; the wait queue is a **global skip-FIFO by creation time** (was
 > per-group). The `groups`/`group_devices` tables, `/api/v1/groups` API, `GroupService`,
 > `allocator group` CLI, and the `allocator_contract.group` models were all deleted. The
 > sections below have been updated to match.
@@ -72,7 +72,7 @@ Background tasks (manager `tasks/`, started in `main.py` lifespan): `heartbeat_r
     fingerprints are unique **per node**, not globally.
 - **device_names**: `(fingerprint → name)` — durable, portable custom-name memory; survives
   unplug/prune and follows a device across nodes.
-- **sessions**: `client_id`, `requested_devices` (`text[]` of logical names the client asked
+- **sessions**: `client_id`, `requested_devices` (`varchar(255)[]` of logical names the client asked
   for), `status` (**PENDING**/ACTIVE/RELEASED/FAILED), `requested_node_id` (pin),
   `node_id` (resolved).
 - **session_devices**: per-device allocation rows (device_id, snapshot logical_name, node,
@@ -105,9 +105,10 @@ IMAGE, SMARTCARD, SERIAL, GENERIC.
 - Eligible node = ONLINE, **not frozen**, all names FREE. Among eligible, pick **fewest total
   devices**. Reservation locks rows `FOR UPDATE NOWAIT` in a savepoint; bind is a saga outside
   the txn with reverse-order rollback on failure.
-- No eligible node → session **PENDING** (queued). `queue_processor` is **FIFO keyed on the
-  sorted requested-device set**, triggered on release/sync/unfreeze (+ 15s safety sweep),
-  head-of-line per device set (sessions wanting different sets never block each other).
+- No eligible node → session **PENDING** (queued). `queue_processor` is a **global skip-FIFO
+  by `created_at`**, triggered on release/sync/unfreeze (+ 15s safety sweep): every PENDING
+  session is tried oldest-first; unsatisfiable ones are skipped and never block younger ones
+  (starvation of multi-device requests by newer subset requests is an accepted risk).
 - Client may **pin** a node (`--node`); frozen/missing → reject, busy → queue for that node.
 
 **Freezing:** a client with an ACTIVE session freezes that session's node
