@@ -15,9 +15,8 @@ def test_accepts_unique_names():
 def test_rejects_duplicates_and_names_them():
     with pytest.raises(ValidationError) as exc:
         SessionCreate(devices=["a", "b", "a", "c", "c"])
-    msg = str(exc.value)
-    assert "duplicate device names" in msg
-    assert "a" in msg and "c" in msg
+    errors = exc.value.errors()
+    assert any("duplicate device names: a, c" in e["msg"] for e in errors)
 
 
 def test_rejects_empty_list():
@@ -34,6 +33,11 @@ def test_rejects_invalid_name_pattern(bad):
 def test_rejects_overlong_name():
     with pytest.raises(ValidationError):
         SessionCreate(devices=["x" * 101])
+
+
+def test_accepts_max_length_name():
+    sc = SessionCreate(devices=["x" * 100])
+    assert len(sc.devices[0]) == 100
 
 
 def test_node_pin_optional():
