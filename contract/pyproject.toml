@@ -11,9 +11,17 @@ dependencies = [
     "pydantic>=2.7",
 ]
 
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.2",
+]
+
 [tool.hatch.build.targets.wheel]
 packages = ["allocator_contract"]
 
 [tool.ruff]
 line-length = 100
 target-version = "py312"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
