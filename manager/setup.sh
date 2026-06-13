@@ -164,9 +164,10 @@ MANAGER_URL="http://${MDNS_NAME}${PORT_SUFFIX}"
 
 # ── done ──────────────────────────────────────────────────────────────────────
 section "Done"
-echo -e "  ${GREEN}LAN URL${NC}  $MANAGER_URL          ${YELLOW}# use this on clients/agents${NC}"
-echo -e "  ${GREEN}Local${NC}    http://localhost${PORT_SUFFIX}"
-echo -e "  ${GREEN}Docs${NC}     $MANAGER_URL/docs"
+echo -e "  ${GREEN}LAN URL${NC}    $MANAGER_URL          ${YELLOW}# use this on clients/agents${NC}"
+echo -e "  ${GREEN}Local${NC}      http://localhost${PORT_SUFFIX}"
+echo -e "  ${GREEN}Dashboard${NC}  $MANAGER_URL/          ${YELLOW}# operator console (GUI)${NC}"
+echo -e "  ${GREEN}Docs${NC}       $MANAGER_URL/docs"
 echo ""
 echo -e "Point the others at it:"
 echo -e "  client:  ${GREEN}export ALLOCATOR_URL=$MANAGER_URL${NC}"
