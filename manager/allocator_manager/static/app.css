@@ -1,0 +1,153 @@
+:root {
+  --bg: #0f1419;
+  --panel: #1a212b;
+  --panel-2: #222b38;
+  --border: #2c3848;
+  --text: #d6deeb;
+  --muted: #7a8aa0;
+  --free: #3fb950;
+  --alloc: #d29922;
+  --error: #f85149;
+  --online: #3fb950;
+  --offline: #6e7681;
+  --frozen: #58a6ff;
+  --highlight: #1f6feb;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  font: 14px/1.4 ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--border);
+  position: sticky;
+  top: 0;
+  z-index: 5;
+}
+header h1 { font-size: 16px; margin: 0; letter-spacing: 0.5px; }
+.spacer { flex: 1; }
+.muted { color: var(--muted); font-size: 12px; }
+
+.two-pane {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+  padding: 16px;
+  align-items: start;
+}
+@media (max-width: 900px) { .two-pane { grid-template-columns: 1fr; } }
+
+section h2 {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  color: var(--muted);
+  margin: 6px 0 10px;
+}
+
+.node {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.node-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  background: var(--panel-2);
+  border-bottom: 1px solid var(--border);
+}
+.node-head .name { font-weight: 600; }
+.node-head .actions { margin-left: auto; display: flex; gap: 6px; }
+
+.devices { list-style: none; margin: 0; padding: 0; }
+.device {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  border-left: 3px solid transparent;
+}
+.device:last-child { border-bottom: none; }
+.device .logical { font-weight: 600; min-width: 90px; }
+.device .owner { color: var(--muted); font-size: 12px; }
+.device .actions { margin-left: auto; display: flex; gap: 6px; }
+.device.s-free { border-left-color: var(--free); }
+.device.s-allocated { border-left-color: var(--alloc); }
+.device.s-error { border-left-color: var(--error); }
+.device.highlight { background: rgba(31, 111, 235, 0.22); border-left-color: var(--highlight); }
+
+.session {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px 12px;
+  margin-bottom: 10px;
+  cursor: pointer;
+}
+.session.selected { outline: 2px solid var(--highlight); }
+.session .line1 { display: flex; align-items: center; gap: 8px; }
+.session .client { font-weight: 600; }
+.session .arrow { color: var(--muted); }
+.session .actions { margin-left: auto; }
+.chips { display: flex; flex-wrap: wrap; gap: 5px; margin-top: 6px; }
+.chip {
+  font-size: 11px;
+  padding: 2px 7px;
+  border-radius: 10px;
+  background: var(--panel-2);
+  border: 1px solid var(--border);
+  color: var(--muted);
+}
+.pending {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 12px;
+  margin-bottom: 8px;
+}
+
+.badge {
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 10px;
+  border: 1px solid var(--border);
+  text-transform: uppercase;
+  letter-spacing: 0.4px;
+}
+.badge.online { color: var(--online); border-color: var(--online); }
+.badge.offline { color: var(--offline); border-color: var(--offline); }
+.badge.frozen { color: var(--frozen); border-color: var(--frozen); }
+.badge.healthy { color: var(--online); border-color: var(--online); }
+.badge.s-free { color: var(--free); border-color: var(--free); }
+.badge.s-allocated { color: var(--alloc); border-color: var(--alloc); }
+.badge.s-error { color: var(--error); border-color: var(--error); }
+
+button {
+  font: inherit;
+  font-size: 12px;
+  padding: 3px 9px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--panel-2);
+  color: var(--text);
+  cursor: pointer;
+}
+button:hover { border-color: var(--highlight); }
+button.danger:hover { border-color: var(--error); color: var(--error); }
+
+.empty { color: var(--muted); font-style: italic; padding: 4px 0; }

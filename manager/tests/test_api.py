@@ -58,3 +58,83 @@ async def test_rename_conflict_is_409(client, make_node, make_device):
     )
     assert resp.status_code == 409
     assert resp.json()["detail"]["error"] == "name_conflict"
+
+
+# ----- dashboard: overview + operator actions ------------------------------
+
+def _find_device(overview, node_name, logical):
+    node = next(n for n in overview["nodes"] if n["name"] == node_name)
+    return next(d for d in node["devices"] if d["logical_name"] == logical)
+
+
+async def test_overview_lists_nodes_and_devices(client, make_node, make_device):
+    node = await make_node()
+    await make_device(node, "wifi_0")
+
+    resp = await client.get("/api/v1/overview")  # no auth headers
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["manager"]["status"] == "healthy"
+    dev = _find_device(body, node.name, "wifi_0")
+    assert dev["status"] == "FREE"
+    assert dev["owner"] is None
+
+
+async def test_overview_shows_allocated_owner_and_active_session(client, make_node, make_device):
+    node = await make_node()
+    await make_device(node, "wifi_0")
+    created = await client.post("/api/v1/sessions", json={"devices": ["wifi_0"]}, headers=CID)
+    assert created.status_code == 201 and created.json()["status"] == "ACTIVE"
+    sid = created.json()["session_id"]
+
+    body = (await client.get("/api/v1/overview")).json()
+    dev = _find_device(body, node.name, "wifi_0")
+    assert dev["status"] == "ALLOCATED"
+    assert dev["owner"] == {"client_id": "host-a", "session_id": sid}
+
+    assert len(body["active_sessions"]) == 1
+    sess = body["active_sessions"][0]
+    assert sess["client_id"] == "host-a"
+    assert sess["node_name"] == node.name
+    assert [d["logical_name"] for d in sess["devices"]] == ["wifi_0"]
+
+
+async def test_overview_lists_pending_sessions(client):
+    created = await client.post("/api/v1/sessions", json={"devices": ["wifi_0"]}, headers=CID)
+    assert created.json()["status"] == "PENDING"  # no nodes/devices exist
+
+    body = (await client.get("/api/v1/overview")).json()
+    assert len(body["pending_sessions"]) == 1
+    assert body["pending_sessions"][0]["requested_devices"] == ["wifi_0"]
+
+
+async def test_freeze_and_unfreeze_node(client, make_node):
+    node = await make_node()
+
+    frozen = await client.post(f"/api/v1/nodes/{node.name}/freeze")
+    assert frozen.status_code == 200 and frozen.json()["frozen"] is True
+
+    thawed = await client.post(f"/api/v1/nodes/{node.name}/unfreeze")
+    assert thawed.status_code == 200 and thawed.json()["frozen"] is False
+
+
+async def test_force_release_bypasses_ownership(client, make_node, make_device, agent):
+    node = await make_node()
+    await make_device(node, "wifi_0")
+    created = await client.post("/api/v1/sessions", json={"devices": ["wifi_0"]}, headers=CID)
+    assert created.json()["status"] == "ACTIVE"
+    sid = created.json()["session_id"]
+
+    # Operator (different client / no X-Client-Id) force-releases it.
+    resp = await client.post(f"/api/v1/sessions/{sid}/force-release")
+    assert resp.status_code == 204
+    assert "wifi_0" in agent.unbinds
+
+    body = (await client.get("/api/v1/overview")).json()
+    assert _find_device(body, node.name, "wifi_0")["status"] == "FREE"
+    assert body["active_sessions"] == []
+
+
+async def test_force_release_unknown_session_is_404(client):
+    resp = await client.post(f"/api/v1/sessions/{uuid.uuid4()}/force-release")
+    assert resp.status_code == 404

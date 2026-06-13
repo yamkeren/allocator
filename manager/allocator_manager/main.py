@@ -1,10 +1,13 @@
 import asyncio
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 import structlog
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from allocator_manager.api.v1.router import internal_router, v1_router
 from allocator_manager.config import settings
@@ -12,6 +15,8 @@ from allocator_manager.database import engine
 from allocator_manager.observability.logging import configure_logging
 
 log = structlog.get_logger(__name__)
+
+_STATIC = Path(__file__).parent / "static"
 
 
 async def _run_periodic(fn, interval: int) -> None:
@@ -72,6 +77,12 @@ def create_app() -> FastAPI:
 
     app.include_router(v1_router, prefix="/api/v1")
     app.include_router(internal_router, prefix="/internal/v1")
+
+    app.mount("/static", StaticFiles(directory=_STATIC), name="static")
+
+    @app.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def dashboard() -> str:
+        return (_STATIC / "index.html").read_text()
 
     @app.get("/health", tags=["health"])
     async def health() -> dict[str, Any]:

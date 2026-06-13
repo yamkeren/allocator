@@ -241,6 +241,19 @@ class NodeService:
                 select(Node).where(Node.name == ident)
             )).scalar_one_or_none()
 
+    async def freeze(self, ident: str) -> NodeResponse:
+        node = await self._resolve(ident)
+        if not node:
+            from fastapi import HTTPException, status as http_status
+            raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Node not found")
+        if not node.frozen:
+            node.frozen = True
+            node.updated_at = datetime.now(UTC)
+            await self._db.commit()
+            log.info("node_frozen", node_id=str(node.id), node_name=node.name)
+            # Freezing can only remove eligibility, so there's nothing to kick.
+        return _node_to_response(node)
+
     async def unfreeze(self, ident: str) -> NodeResponse:
         node = await self._resolve(ident)
         if not node:

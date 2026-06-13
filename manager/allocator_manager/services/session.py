@@ -159,7 +159,23 @@ class SessionService:
             raise HTTPException(status_code=http_status.HTTP_403_FORBIDDEN, detail="Not your session")
         if session.status in (SessionStatus.RELEASED, SessionStatus.FAILED):
             return  # idempotent
+        await self._release_session(session)
 
+    async def force_release(self, session_id: str) -> None:
+        """Operator release of ANY client's session (dashboard). No ownership check.
+
+        Reuses the same unbind/free path as `release`, so an offline agent only
+        logs a warning and the devices still come back FREE in the manager.
+        """
+        session = await self._load_session(session_id)
+        if not session:
+            raise HTTPException(status_code=http_status.HTTP_404_NOT_FOUND, detail="Session not found")
+        if session.status in (SessionStatus.RELEASED, SessionStatus.FAILED):
+            return  # idempotent
+        await self._release_session(session)
+
+    async def _release_session(self, session: Session) -> None:
+        session_id = str(session.id)
         now = datetime.now(UTC)
         for sd in session.session_devices:
             if sd.status not in (SessionDeviceStatus.RELEASED, SessionDeviceStatus.ERROR):

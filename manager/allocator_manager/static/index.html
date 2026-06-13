@@ -1,0 +1,34 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Allocator — Operator Console</title>
+  <link rel="stylesheet" href="/static/app.css" />
+</head>
+<body>
+  <header>
+    <h1>Allocator</h1>
+    <span id="manager-status" class="badge">…</span>
+    <span id="manager-version" class="muted"></span>
+    <span class="spacer"></span>
+    <span id="updated" class="muted"></span>
+  </header>
+
+  <main class="two-pane">
+    <section id="nodes-pane">
+      <h2>Nodes &amp; Devices</h2>
+      <div id="nodes"></div>
+    </section>
+
+    <section id="sessions-pane">
+      <h2>Active Sessions</h2>
+      <div id="active-sessions"></div>
+      <h2>Pending Queue</h2>
+      <div id="pending-sessions"></div>
+    </section>
+  </main>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

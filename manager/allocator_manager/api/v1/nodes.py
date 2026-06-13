@@ -28,6 +28,15 @@ async def get_node(
     return node
 
 
+@router.post("/{node}/freeze", response_model=NodeResponse)
+async def freeze_node(
+    node: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+) -> NodeResponse:
+    """Freeze a node so it is excluded from new session allocation."""
+    return await NodeService(db).freeze(node)
+
+
 @router.post("/{node}/unfreeze", response_model=NodeResponse)
 async def unfreeze_node(
     node: str = Path(...),

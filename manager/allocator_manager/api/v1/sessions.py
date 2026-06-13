@@ -63,3 +63,12 @@ async def release_session(
     db: AsyncSession = Depends(get_db),
 ) -> None:
     await SessionService(db).release(session_id=session_id, client_id=client_id)
+
+
+@router.post("/{session_id}/force-release", status_code=status.HTTP_204_NO_CONTENT)
+async def force_release_session(
+    session_id: str = Path(...),
+    db: AsyncSession = Depends(get_db),
+) -> None:
+    """Operator release of any session, regardless of owner (dashboard). No auth."""
+    await SessionService(db).force_release(session_id=session_id)
