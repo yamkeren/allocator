@@ -65,7 +65,9 @@ def test_session_create_rejects_duplicates(fake_client):
 def test_session_create_rejects_empty(fake_client):
     result = runner.invoke(app, ["session", "create", "--devices", " , "])
     assert result.exit_code != 0
-    assert "at least one device" in result.output
+    # Message comes from SessionCreate's min_length=1 (single source of truth).
+    assert "at least 1" in result.output
+    assert fake_client.calls == []
 
 
 def test_config_set_and_show(tmp_path, monkeypatch):

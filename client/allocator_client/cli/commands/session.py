@@ -3,11 +3,13 @@ import os
 from pathlib import Path
 
 import typer
+from pydantic import ValidationError
 from rich.console import Console
 from rich.table import Table
 
 from allocator_client import usbip as usbip_helper
 from allocator_client.cli.commands._common import get_client
+from allocator_contract.session import SessionCreate
 
 app = typer.Typer(help="Manage sessions")
 console = Console()
@@ -76,13 +78,14 @@ def create_session(
 ) -> None:
     """Request a session for a list of devices (allocated atomically on a single node)."""
     device_list = [d.strip() for d in devices.split(",") if d.strip()]
-    if not device_list:
-        raise typer.BadParameter("provide at least one device name", param_hint="--devices")
-    dupes = sorted({d for d in device_list if device_list.count(d) > 1})
-    if dupes:
-        raise typer.BadParameter(
-            f"duplicate device names: {', '.join(dupes)}", param_hint="--devices"
-        )
+    # SessionCreate is the single source of truth for device-list rules
+    # (non-empty, no duplicates, name pattern). Validate at the boundary so a
+    # bad value is a clean CLI error before we open a client or hit the network.
+    try:
+        SessionCreate(devices=device_list, node=node)
+    except ValidationError as exc:
+        msg = "; ".join(e["msg"] for e in exc.errors())
+        raise typer.BadParameter(msg, param_hint="--devices") from exc
     with get_client() as client:
         s = client.create_session(device_list, node=node)
         on = f"  node={s.node_name}" if s.node_name else ""
